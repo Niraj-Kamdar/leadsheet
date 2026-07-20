@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "leadsheet"
-version = "0.1.0"
+version = "0.1.1"
 description = "Local MCP server + Claude Skill that lets Claude compose real music (chords, bass, melody, drums) via musicpy, without hand-writing musicpy's operator syntax."
 readme = "README.md"
 requires-python = ">=3.10"

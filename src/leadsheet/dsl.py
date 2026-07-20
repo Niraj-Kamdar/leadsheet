@@ -18,9 +18,38 @@ grammar-level reason to forbid that, and the round-trip equivalence test
 segment-line mechanism is role-agnostic: any non-drums track may use it,
 and `raw:`/`notes:` remain available line-forms on any non-drums track
 header too (only melody tracks make musical use of them in practice).
+
+Extensions beyond spec-2.md (added after real orchestral-scoring usage
+surfaced gaps the original pop/lo-fi/chiptune/riff-rock benchmark corpus
+never exercised):
+- A chord-list token may carry a `*<bars>` suffix (a plain decimal or
+  `<a>/<b>` fraction, e.g. `Am7*0.5`) to override the default 1-bar
+  duration -- sub-bar harmonic changes.
+- The bare token `r` (optionally with `*<bars>`) in a chord-list is a rest
+  -- emits a `NoteEvent(rest=True)` instead of a `ChordEvent`, since `r`
+  can never collide with a real chord symbol (chord symbols always start
+  with an uppercase note letter).
+- `bars=<n>` is a new header modifier mapping to `TrackSchema.
+  expected_bars` -- a hard assertion checked by theory_check.py (not here;
+  it needs a RawEvent's real compiled duration, which this pure-syntax
+  parser doesn't have access to).
+- `define <name>: <content>` / `use: <name> [x<n>]` -- piece-wide named
+  macros. A `define` line is only valid between tracks (same scope as a
+  track header) and captures exactly the same content shapes a track
+  header can (chord-list segment / `raw:` / `notes:` / drum-token-list,
+  the last inferred by the presence of a comma -- chord-lists are always
+  space-separated, drum-token-lists always comma-separated, so this is
+  unambiguous). `use: <name> [x<n>]` then replays that captured content
+  wherever a chord-list segment could go -- inline on a track header, as
+  one of several segment lines, or as a drum track's token list -- kind-
+  checked against where it's used. No nested macros (a macro body can't
+  itself `use:` another one).
 """
 
 from __future__ import annotations
+
+import re
+from fractions import Fraction
 
 # Mirrors schema.py's closed-vocabulary Literal values -- deliberately
 # hardcoded here rather than imported, since the parser only needs to
@@ -36,11 +65,18 @@ STYLE_VALUES = {
     "root_fifth",
     "walking",
 }
-HEADER_MOD_KEYS = {"name", "start", "vol", "repeat"}
+HEADER_MOD_KEYS = {"name", "start", "vol", "repeat", "bars"}
 SEGMENT_MOD_KEYS = {"subdiv", "oct", "pattern", "vel"}
 TOP_LEVEL_KEYS = {"bpm", "title", "key"}
 
-_HEADER_FIELD_NAMES = {"name": "name", "start": "start_bar", "vol": "volume", "repeat": "repeat"}
+_HEADER_FIELD_NAMES = {
+    "name": "name",
+    "start": "start_bar",
+    "vol": "volume",
+    "repeat": "repeat",
+    "bars": "expected_bars",
+}
+_MACRO_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
 class DslSyntaxError(Exception):
@@ -142,7 +178,13 @@ def _find_terminator(tokens: list[_Token], line_no: int, what: str) -> int:
 
 
 def _classify_middle(
-    tokens: list[_Token], start: int, terminator_idx: int, line_no: int, *, allow_header_mods: bool
+    tokens: list[_Token],
+    start: int,
+    terminator_idx: int,
+    line_no: int,
+    *,
+    allow_header_mods: bool,
+    context: str = "segment line",
 ) -> tuple[dict, dict, str | None, str | None]:
     """Classifies tokens[start:terminator_idx+1] (colon stripped from the
     terminator token) into (header_mods, segment_mods, style, content_kind).
@@ -162,7 +204,7 @@ def _classify_middle(
             if key in HEADER_MOD_KEYS:
                 if not allow_header_mods:
                     raise DslSyntaxError(
-                        f"line {line_no}: '{key}=' is only valid on a track header line, not a segment line"
+                        f"line {line_no}: '{key}=' is only valid on a track header line, not a {context}"
                     )
                 if key in header_mods:
                     raise DslSyntaxError(f"line {line_no}: duplicate {key}= modifier")
@@ -177,14 +219,14 @@ def _classify_middle(
             if style is not None:
                 raise DslSyntaxError(f"line {line_no}: duplicate style token {bare!r}")
             style = bare
-        elif bare in ("raw", "notes"):
+        elif bare in ("raw", "notes", "use"):
             if content_kind is not None:
                 raise DslSyntaxError(f"line {line_no}: duplicate {bare!r} keyword")
             content_kind = bare
         else:
             raise DslSyntaxError(
                 f"line {line_no}: unrecognized token {bare!r} -- expected a style keyword "
-                f"({'|'.join(sorted(STYLE_VALUES))}), 'raw', 'notes', or a key=value modifier"
+                f"({'|'.join(sorted(STYLE_VALUES))}), 'raw', 'notes', 'use', or a key=value modifier"
             )
     return header_mods, segment_mods, style, content_kind
 
@@ -195,20 +237,45 @@ def _header_fields(header_mods: dict, line_no: int) -> dict:
         field_name = _HEADER_FIELD_NAMES[key]
         if key == "name":
             fields[field_name] = value
-        elif key == "start":
-            fields[field_name] = _num(value, line_no, "start=")
+        elif key in ("start", "bars"):
+            fields[field_name] = _num(value, line_no, f"{key}=")
         else:  # vol, repeat
             fields[field_name] = int(_num(value, line_no, f"{key}="))
     return fields
 
 
+def _eval_bars(text: str, line_no: int) -> float:
+    """Evaluates a chord-list token's `*<bars>` suffix -- a plain decimal
+    ("0.5", "2") or an "<a>/<b>" fraction ("1/2"), same string shapes
+    `fractions.Fraction` itself accepts (mirrors schema.py's parse_fraction
+    convention). Unlike subdiv=/vel=/etc, this is evaluated eagerly to a
+    real number here: ChordEvent.bars/NoteEvent.duration in this position
+    need a number, not a passthrough fraction string."""
+    try:
+        return float(Fraction(text))
+    except (ValueError, ZeroDivisionError):
+        raise DslSyntaxError(f"line {line_no}: bars value {text!r} is not a number") from None
+
+
 def _build_chord_events(style: str | None, segment_mods: dict, content: str, line_no: int) -> list[dict]:
-    symbols = content.split()
-    if not symbols:
+    tokens = content.split()
+    if not tokens:
         raise DslSyntaxError(f"line {line_no}: empty chord list")
     events = []
-    for symbol in symbols:
-        event: dict = {"type": "chord", "chord": symbol, "bars": 1}
+    for token in tokens:
+        if "*" in token:
+            symbol, _, bars_suffix = token.rpartition("*")
+            if not symbol:
+                raise DslSyntaxError(f"line {line_no}: {token!r} is missing a chord/rest before '*'")
+            bars: float | int = _eval_bars(bars_suffix, line_no)
+        else:
+            symbol, bars = token, 1
+
+        if symbol == "r":
+            events.append({"type": "note", "rest": True, "duration": bars})
+            continue
+
+        event: dict = {"type": "chord", "chord": symbol, "bars": bars}
         if style is not None:
             event["style"] = style
         if "oct" in segment_mods:
@@ -245,7 +312,111 @@ def _parse_notes_content(content: str, line_no: int) -> list[dict]:
     return events
 
 
-def _parse_track_header(tokens: list[_Token], line: str, line_no: int) -> tuple[dict, bool]:
+def _parse_use_content(content: str, line_no: int) -> tuple[str, int]:
+    parts = content.split()
+    if not parts:
+        raise DslSyntaxError(f"line {line_no}: use: requires a macro name")
+    if len(parts) > 2:
+        raise DslSyntaxError(f"line {line_no}: use: takes a macro name and optional x<n>, got: {content!r}")
+    name = parts[0]
+    count = 1
+    if len(parts) == 2:
+        repeat_tok = parts[1]
+        if not (repeat_tok.startswith("x") and repeat_tok[1:].isdigit()):
+            raise DslSyntaxError(f"line {line_no}: use: repeat count must look like x4, got: {repeat_tok!r}")
+        count = int(repeat_tok[1:])
+        if count < 1:
+            raise DslSyntaxError(f"line {line_no}: use: repeat count must be >= 1, got: {repeat_tok!r}")
+    return name, count
+
+
+def _expand_use(macros: dict, name: str, count: int, line_no: int, *, expected_kind: str):
+    if name not in macros:
+        raise DslSyntaxError(f"line {line_no}: undefined macro {name!r} -- no matching 'define {name}:' line")
+    kind, payload = macros[name]
+    if kind != expected_kind:
+        raise DslSyntaxError(
+            f"line {line_no}: macro {name!r} is a {kind!r}-kind macro, but this position needs a "
+            f"{expected_kind!r}-kind macro"
+        )
+    if kind == "drum":
+        tokens = [t.strip() for t in payload.split(",")]
+        return ", ".join(tokens * count)
+    return [dict(event) for _ in range(count) for event in payload]
+
+
+def _parse_define(tokens: list[_Token], line: str, line_no: int, macros: dict) -> None:
+    if len(tokens) < 2:
+        raise DslSyntaxError(f"line {line_no}: define is missing a macro name")
+
+    name_bare = tokens[1].text[:-1] if tokens[1].text.endswith(":") else tokens[1].text
+    if not _MACRO_NAME_RE.match(name_bare):
+        raise DslSyntaxError(
+            f"line {line_no}: {name_bare!r} is not a valid macro name "
+            "(letters/digits/underscore, must start with a letter or underscore)"
+        )
+    if name_bare in macros:
+        raise DslSyntaxError(f"line {line_no}: macro {name_bare!r} is already defined")
+
+    terminator_idx = _find_terminator(tokens[1:], line_no, "define line must end with ':' somewhere") + 1
+    _header_mods, segment_mods, style, content_kind = _classify_middle(
+        tokens, 2, terminator_idx, line_no, allow_header_mods=False, context="define body"
+    )
+    content = line[tokens[terminator_idx].end:].strip()
+
+    if content_kind == "use":
+        raise DslSyntaxError(f"line {line_no}: a macro body can't itself use: another macro (no nested macros)")
+
+    if content_kind == "raw":
+        if segment_mods or style:
+            raise DslSyntaxError(f"line {line_no}: raw: can't be combined with style/subdiv/oct/pattern/vel")
+        if not content:
+            raise DslSyntaxError(f"line {line_no}: raw: requires a note-string after it")
+        macros[name_bare] = ("events", [{"type": "raw", "notes": content}])
+        return
+
+    if content_kind == "notes":
+        if segment_mods or style:
+            raise DslSyntaxError(f"line {line_no}: notes: can't be combined with style/subdiv/oct/pattern/vel")
+        if not content:
+            raise DslSyntaxError(f"line {line_no}: notes: requires at least one <note>@<fraction> token")
+        macros[name_bare] = ("events", _parse_notes_content(content, line_no))
+        return
+
+    if not content:
+        raise DslSyntaxError(f"line {line_no}: define {name_bare!r} has no content after ':'")
+
+    if content.startswith(("raw:", "notes:", "use:")):
+        # The most likely cause: a colon was written right after the macro
+        # name (`define name: raw: ...`) instead of before raw:/notes:/use:
+        # (`define name raw: ...`) -- that misplaced colon becomes the
+        # terminator, so raw:/notes:/use: never gets classified and falls
+        # through to here as literal text instead. Give a specific nudge
+        # rather than silently (and wrongly) treating it as a drum pattern.
+        keyword = content.split(":", 1)[0]
+        raise DslSyntaxError(
+            f"line {line_no}: content starts with '{keyword}:' but the ':' right after the macro "
+            f"name already ended the header -- write 'define {name_bare} {keyword}: ...' "
+            f"(no ':' after the name), not 'define {name_bare}: {keyword}: ...'"
+        )
+
+    if "," in content:
+        # Drum-token-lists are always comma-separated and chord-lists never
+        # are (they're space-separated) -- an unambiguous kind signal.
+        if segment_mods or style:
+            raise DslSyntaxError(f"line {line_no}: a drum-token-list macro doesn't take style/subdiv/oct/pattern/vel")
+        pattern_tokens = [t.strip() for t in content.split(",")]
+        if any(not t for t in pattern_tokens):
+            raise DslSyntaxError(f"line {line_no}: empty drum token in list: {content!r}")
+        macros[name_bare] = ("drum", ", ".join(pattern_tokens))
+        return
+
+    macros[name_bare] = ("events", _build_chord_events(style, segment_mods, content, line_no))
+
+
+def _parse_track_header(
+    tokens: list[_Token], line: str, line_no: int, macros: dict
+) -> tuple[dict, bool]:
     """Returns (track_dict, closed). `closed=False` means the track stays
     open for following segment lines."""
     role = tokens[0].text
@@ -265,11 +436,23 @@ def _parse_track_header(tokens: list[_Token], line: str, line_no: int) -> tuple[
     fields = _header_fields(header_mods, line_no)
     content = line[tokens[terminator_idx].end:].strip()
 
+    if "bars" in header_mods and role == "drums":
+        raise DslSyntaxError(
+            f"line {line_no}: bars= isn't checkable on a drums track (it has no events to sum)"
+        )
+
     if role == "drums":
-        if segment_mods or style or content_kind:
-            raise DslSyntaxError(
-                f"line {line_no}: drums tracks don't take style/subdiv/oct/pattern/vel/raw/notes modifiers"
-            )
+        if segment_mods or style:
+            raise DslSyntaxError(f"line {line_no}: drums tracks don't take style/subdiv/oct/pattern/vel modifiers")
+        if content_kind in ("raw", "notes"):
+            raise DslSyntaxError(f"line {line_no}: drums tracks don't take {content_kind}:")
+        if content_kind == "use":
+            if not content:
+                raise DslSyntaxError(f"line {line_no}: use: requires a macro name")
+            name, count = _parse_use_content(content, line_no)
+            drum_pattern = _expand_use(macros, name, count, line_no, expected_kind="drum")
+            track = {"role": role, "instrument": instrument_value, **fields, "drum_pattern": drum_pattern}
+            return track, True
         if not content:
             raise DslSyntaxError(f"line {line_no}: drums track is missing a comma-separated drum-token list")
         pattern_tokens = [t.strip() for t in content.split(",")]
@@ -295,6 +478,16 @@ def _parse_track_header(tokens: list[_Token], line: str, line_no: int) -> tuple[
         track = {"role": role, "instrument": instrument_value, **fields, "events": events}
         return track, True
 
+    if content_kind == "use":
+        if segment_mods or style:
+            raise DslSyntaxError(f"line {line_no}: use: can't be combined with style/subdiv/oct/pattern/vel")
+        if not content:
+            raise DslSyntaxError(f"line {line_no}: use: requires a macro name")
+        name, count = _parse_use_content(content, line_no)
+        events = _expand_use(macros, name, count, line_no, expected_kind="events")
+        track = {"role": role, "instrument": instrument_value, **fields, "events": events}
+        return track, True
+
     if not content:
         if segment_mods or style:
             raise DslSyntaxError(
@@ -309,16 +502,25 @@ def _parse_track_header(tokens: list[_Token], line: str, line_no: int) -> tuple[
     return track, True
 
 
-def _parse_segment_line(tokens: list[_Token], line: str, line_no: int) -> list[dict]:
+def _parse_segment_line(tokens: list[_Token], line: str, line_no: int, macros: dict) -> list[dict]:
     terminator_idx = _find_terminator(tokens, line_no, "segment line must end with ':' before the chord list")
     _header_mods, segment_mods, style, content_kind = _classify_middle(
         tokens, 0, terminator_idx, line_no, allow_header_mods=False
     )
+    content = line[tokens[terminator_idx].end:].strip()
+
+    if content_kind == "use":
+        if segment_mods or style:
+            raise DslSyntaxError(f"line {line_no}: use: can't be combined with style/subdiv/oct/pattern/vel")
+        if not content:
+            raise DslSyntaxError(f"line {line_no}: use: requires a macro name")
+        name, count = _parse_use_content(content, line_no)
+        return _expand_use(macros, name, count, line_no, expected_kind="events")
+
     if content_kind:
         raise DslSyntaxError(
             f"line {line_no}: '{content_kind}:' is only valid on a track header line, not a segment line"
         )
-    content = line[tokens[terminator_idx].end:].strip()
     if not content:
         raise DslSyntaxError(f"line {line_no}: segment line has no chord list after ':'")
     return _build_chord_events(style, segment_mods, content, line_no)
@@ -330,6 +532,7 @@ def parse_dsl(text: str) -> dict:
     top_level: dict | None = None
     tracks: list[dict] = []
     current_track: dict | None = None
+    macros: dict[str, tuple[str, object]] = {}
 
     for line_no, line in enumerate(text.splitlines(), start=1):
         if not line.strip():
@@ -341,11 +544,20 @@ def parse_dsl(text: str) -> dict:
             top_level = _parse_top_level(tokens, line_no)
             continue
 
+        if first == "define":
+            if current_track is not None:
+                raise DslSyntaxError(
+                    f"line {line_no}: 'define' can't appear inside an open track -- "
+                    "close the current track first (a define line only makes sense between tracks)"
+                )
+            _parse_define(tokens, line, line_no, macros)
+            continue
+
         if first in ROLES:
             if current_track is not None:
                 tracks.append(current_track)
                 current_track = None
-            track, closed = _parse_track_header(tokens, line, line_no)
+            track, closed = _parse_track_header(tokens, line, line_no, macros)
             if closed:
                 tracks.append(track)
             else:
@@ -355,9 +567,9 @@ def parse_dsl(text: str) -> dict:
         if current_track is None:
             raise DslSyntaxError(
                 f"line {line_no}: unrecognized line -- expected a role keyword "
-                f"({'|'.join(sorted(ROLES))}) or bpm=, got: {first!r}"
+                f"({'|'.join(sorted(ROLES))}), 'define', or bpm=, got: {first!r}"
             )
-        current_track["events"].extend(_parse_segment_line(tokens, line, line_no))
+        current_track["events"].extend(_parse_segment_line(tokens, line, line_no, macros))
 
     if current_track is not None:
         tracks.append(current_track)

@@ -131,6 +131,202 @@ def test_multiple_tracks_and_custom_role():
 
 
 # ---------------------------------------------------------------------------
+# Sub-bar chords, rests, and the bars= assertion (orchestral-scoring fixes)
+# ---------------------------------------------------------------------------
+
+
+def test_chord_list_token_bars_suffix_decimal_and_fraction():
+    result = dsl.parse_dsl('bpm=100\nchords "Piano" block: Am7*0.5 C*1/2 F*2\n')
+    events = result["tracks"][0]["events"]
+    assert [e["bars"] for e in events] == [0.5, 0.5, 2.0]
+
+
+def test_chord_list_token_no_suffix_defaults_to_bars_1():
+    result = dsl.parse_dsl('bpm=100\nchords "Piano" block: C\n')
+    assert result["tracks"][0]["events"][0]["bars"] == 1
+
+
+def test_chord_list_rest_token():
+    result = dsl.parse_dsl('bpm=100\nchords "Piano" block: C r Am7\n')
+    events = result["tracks"][0]["events"]
+    assert events[1] == {"type": "note", "rest": True, "duration": 1}
+    # rest doesn't pick up the segment's style/etc -- NoteEvent has no such fields
+    assert events[0]["style"] == "block"
+    assert "style" not in events[1]
+
+
+def test_chord_list_rest_token_with_bars_suffix():
+    result = dsl.parse_dsl('bpm=100\nchords "Piano" oct=2 subdiv=1/8: r*0.25 C\n')
+    events = result["tracks"][0]["events"]
+    assert events[0] == {"type": "note", "rest": True, "duration": 0.25}
+    assert events[1]["octave"] == 2  # segment modifiers still apply to the real chord
+
+
+def test_chord_list_bars_suffix_and_rest_work_in_multi_segment_tracks():
+    text = (
+        'bpm=100\n'
+        'chords "Piano":\n'
+        '  block: Am7*0.5 r*0.5\n'
+        '  block: C\n'
+    )
+    events = dsl.parse_dsl(text)["tracks"][0]["events"]
+    assert events == [
+        {"type": "chord", "chord": "Am7", "bars": 0.5, "style": "block"},
+        {"type": "note", "rest": True, "duration": 0.5},
+        {"type": "chord", "chord": "C", "bars": 1, "style": "block"},
+    ]
+
+
+def test_error_bars_suffix_not_a_number():
+    with pytest.raises(dsl.DslSyntaxError, match=r"line 2.*bars value.*not a number"):
+        dsl.parse_dsl('bpm=100\nchords "Piano" block: C*abc\n')
+
+
+def test_error_bars_suffix_missing_chord():
+    with pytest.raises(dsl.DslSyntaxError, match=r"line 2.*missing a chord/rest before"):
+        dsl.parse_dsl('bpm=100\nchords "Piano" block: *0.5\n')
+
+
+def test_bars_header_modifier_maps_to_expected_bars():
+    result = dsl.parse_dsl('bpm=100\nchords "Piano" bars=2 block: C G\n')
+    assert result["tracks"][0]["expected_bars"] == 2
+
+
+def test_error_bars_modifier_rejected_on_drums():
+    with pytest.raises(dsl.DslSyntaxError, match=r"line 2.*bars=.*drums track"):
+        dsl.parse_dsl('bpm=100\ndrums "Power Kit" bars=4: K, H, S, H\n')
+
+
+# ---------------------------------------------------------------------------
+# define/use macros
+# ---------------------------------------------------------------------------
+
+
+def test_macro_chord_list_kind_used_inline():
+    text = (
+        'bpm=100\n'
+        'define riff block subdiv=1/4 oct=2: C G\n'
+        'chords "Distortion Guitar" use: riff\n'
+    )
+    events = dsl.parse_dsl(text)["tracks"][0]["events"]
+    assert events == [
+        {"type": "chord", "chord": "C", "bars": 1, "style": "block", "octave": 2, "subdivision": "1/4"},
+        {"type": "chord", "chord": "G", "bars": 1, "style": "block", "octave": 2, "subdivision": "1/4"},
+    ]
+
+
+def test_macro_used_as_a_segment_line_among_others():
+    text = (
+        'bpm=100\n'
+        'define riff: C G\n'
+        'chords "Piano":\n'
+        '  block: Am7\n'
+        '  use: riff\n'
+    )
+    events = dsl.parse_dsl(text)["tracks"][0]["events"]
+    assert [e["chord"] for e in events] == ["Am7", "C", "G"]
+
+
+def test_macro_use_repeat_count():
+    text = 'bpm=100\ndefine riff: C G\nchords "Piano" use: riff x3\n'
+    events = dsl.parse_dsl(text)["tracks"][0]["events"]
+    assert [e["chord"] for e in events] == ["C", "G", "C", "G", "C", "G"]
+
+
+def test_macro_use_produces_independent_dict_copies():
+    text = 'bpm=100\ndefine riff: C\nchords "Piano" use: riff x2\n'
+    events = dsl.parse_dsl(text)["tracks"][0]["events"]
+    assert events[0] is not events[1]
+    events[0]["chord"] = "mutated"
+    assert events[1]["chord"] == "C"
+
+
+def test_macro_raw_kind():
+    text = (
+        'bpm=100\n'
+        'define motif raw: C4[1;1], Eb4[1;1], G4[1;1]\n'
+        'melody "Trumpet" name="brass" start=16 use: motif\n'
+        'melody "Violin" name="strings" start=32 use: motif x2\n'
+    )
+    tracks = dsl.parse_dsl(text)["tracks"]
+    assert tracks[0]["events"] == [{"type": "raw", "notes": "C4[1;1], Eb4[1;1], G4[1;1]"}]
+    assert tracks[1]["events"] == [
+        {"type": "raw", "notes": "C4[1;1], Eb4[1;1], G4[1;1]"},
+        {"type": "raw", "notes": "C4[1;1], Eb4[1;1], G4[1;1]"},
+    ]
+
+
+def test_macro_notes_kind():
+    text = 'bpm=100\ndefine phrase notes: E5@1/4 r@1/8\nmelody "Violin" use: phrase\n'
+    events = dsl.parse_dsl(text)["tracks"][0]["events"]
+    assert events == [
+        {"type": "note", "note": "E5", "duration": "1/4"},
+        {"type": "note", "rest": True, "duration": "1/8"},
+    ]
+
+
+def test_macro_drum_kind():
+    text = 'bpm=100\ndefine groove: K, H, S, H\ndrums "Power Kit" use: groove x2\n'
+    track = dsl.parse_dsl(text)["tracks"][0]
+    assert track["drum_pattern"] == "K, H, S, H, K, H, S, H"
+
+
+def test_macro_drum_kind_inferred_from_comma_no_style_prefix():
+    text = 'bpm=100\ndefine groove: K, 0, K, S2\ndrums "TR-808 Kit" use: groove\n'
+    assert dsl.parse_dsl(text)["tracks"][0]["drum_pattern"] == "K, 0, K, S2"
+
+
+def test_error_undefined_macro():
+    with pytest.raises(dsl.DslSyntaxError, match=r"line 2.*undefined macro 'nope'"):
+        dsl.parse_dsl('bpm=100\nchords "Piano" use: nope\n')
+
+
+def test_error_macro_kind_mismatch():
+    text = 'bpm=100\ndefine groove: K, H\nchords "Piano" use: groove\n'
+    with pytest.raises(dsl.DslSyntaxError, match=r"line 3.*'drum'-kind macro.*'events'-kind"):
+        dsl.parse_dsl(text)
+
+
+def test_error_nested_macro_rejected():
+    text = 'bpm=100\ndefine base: C G\ndefine wrapper use: base\n'
+    with pytest.raises(dsl.DslSyntaxError, match=r"line 3.*no nested macros"):
+        dsl.parse_dsl(text)
+
+
+def test_error_duplicate_macro_name():
+    text = 'bpm=100\ndefine riff: C\ndefine riff: G\n'
+    with pytest.raises(dsl.DslSyntaxError, match=r"line 3.*already defined"):
+        dsl.parse_dsl(text)
+
+
+def test_error_invalid_macro_name():
+    with pytest.raises(dsl.DslSyntaxError, match=r"line 2.*not a valid macro name"):
+        dsl.parse_dsl('bpm=100\ndefine 1bad: C\n')
+
+
+def test_error_define_inside_open_track():
+    text = 'bpm=100\nchords "Piano":\n  define riff: C\n'
+    with pytest.raises(dsl.DslSyntaxError, match=r"line 3.*'define' can't appear inside an open track"):
+        dsl.parse_dsl(text)
+
+
+def test_error_use_repeat_count_malformed():
+    text = 'bpm=100\ndefine riff: C\nchords "Piano" use: riff x0\n'
+    with pytest.raises(dsl.DslSyntaxError, match=r"line 3.*repeat count must be >= 1"):
+        dsl.parse_dsl(text)
+
+
+def test_error_misplaced_colon_after_macro_name_gives_actionable_message():
+    """The easy-to-make mistake: `define name: raw: ...` puts the ':' right
+    after the name, which becomes the terminator before 'raw:' is ever
+    seen -- must not be silently misclassified as a drum-kind macro just
+    because the leftover text contains commas."""
+    text = 'bpm=100\ndefine motif: raw: C4[1;1], D4[1;1]\n'
+    with pytest.raises(dsl.DslSyntaxError, match=r"line 2.*'raw:'.*already ended the header"):
+        dsl.parse_dsl(text)
+
+
+# ---------------------------------------------------------------------------
 # Syntax-error cases
 # ---------------------------------------------------------------------------
 

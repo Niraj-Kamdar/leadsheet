@@ -107,6 +107,23 @@ class RawEvent(BaseModel):
 Event = Annotated[Union[ChordEvent, NoteEvent, RawEvent], Field(discriminator="type")]
 
 
+def _structural_bar_sum(events: list[Event] | None) -> float:
+    """Sum of ChordEvent.bars/NoteEvent.duration across `events`, ignoring
+    RawEvent -- a raw note-string's real duration can only be known by
+    actually parsing it with musicpy, which this pure-Pydantic module can't
+    do without a circular import on compiler.py. Used only for the cheap
+    structural guardrails below; theory_check.compute_track_lengths does
+    the fuller computation (including RawEvent) for reporting/assertions.
+    """
+    if not events:
+        return 0.0
+    return float(sum(
+        e.bars if isinstance(e, ChordEvent) else parse_fraction(e.duration, "duration")
+        for e in events
+        if isinstance(e, (ChordEvent, NoteEvent))
+    ))
+
+
 class TrackSchema(BaseModel):
     name: str | None = None
     role: Literal["chords", "bass", "melody", "drums", "custom"]
@@ -117,6 +134,12 @@ class TrackSchema(BaseModel):
     repeat: int = Field(default=1, ge=1)
     events: list[Event] | None = None
     drum_pattern: str | None = None
+    # Optional author-declared "this track's events should sum to exactly
+    # N bars" assertion. Not checked here (a RawEvent's real duration can
+    # only be known by actually parsing its note-string with musicpy,
+    # which schema.py can't do without a circular import on compiler.py) --
+    # theory_check.validate() checks it and reports a mismatch as an error.
+    expected_bars: float | None = Field(default=None, gt=0)
 
     @model_validator(mode="after")
     def _validate_instrument(self) -> "TrackSchema":
@@ -161,18 +184,12 @@ class TrackSchema(BaseModel):
 
     @model_validator(mode="after")
     def _validate_bars_limit(self) -> "TrackSchema":
-        if self.events:
-            total_bars = sum(
-                e.bars if isinstance(e, ChordEvent) else parse_fraction(e.duration, "duration")
-                for e in self.events
-                if isinstance(e, (ChordEvent, NoteEvent))
+        total_bars = _structural_bar_sum(self.events) * self.repeat
+        if total_bars > limits.MAX_BARS_PER_TRACK:
+            raise ValueError(
+                f"track exceeds MAX_BARS_PER_TRACK ({limits.MAX_BARS_PER_TRACK}): "
+                f"got {total_bars} bars"
             )
-            total_bars = float(total_bars) * self.repeat
-            if total_bars > limits.MAX_BARS_PER_TRACK:
-                raise ValueError(
-                    f"track exceeds MAX_BARS_PER_TRACK ({limits.MAX_BARS_PER_TRACK}): "
-                    f"got {total_bars} bars"
-                )
         return self
 
 
@@ -195,12 +212,7 @@ class PieceSchema(BaseModel):
         for track in self.tracks:
             if not track.events:
                 continue
-            track_bars = sum(
-                e.bars if isinstance(e, ChordEvent) else parse_fraction(e.duration, "duration")
-                for e in track.events
-                if isinstance(e, (ChordEvent, NoteEvent))
-            )
-            track_bars = float(track_bars) * track.repeat + track.start_bar
+            track_bars = _structural_bar_sum(track.events) * track.repeat + track.start_bar
             max_bars = max(max_bars, track_bars)
         seconds = max_bars * 4 * 60 / self.bpm
         if seconds > limits.MAX_DURATION_SECONDS:
@@ -216,3 +228,4 @@ class ValidationResult(BaseModel):
     errors: list[str] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
     detected_chords: list[dict] = Field(default_factory=list)
+    track_lengths: list[dict] = Field(default_factory=list)

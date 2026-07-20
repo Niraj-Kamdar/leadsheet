@@ -4,8 +4,15 @@ from pathlib import Path
 import musicpy as mp
 import pytest
 
-from leadsheet.compiler import compile_chord_event, compile_note_event, compile_piece, compile_raw_event
-from leadsheet.schema import ChordEvent, NoteEvent, PieceSchema, RawEvent
+from leadsheet.compiler import (
+    assign_channels,
+    compile_chord_event,
+    compile_note_event,
+    compile_piece,
+    compile_raw_event,
+    track_bar_length,
+)
+from leadsheet.schema import ChordEvent, NoteEvent, PieceSchema, RawEvent, TrackSchema
 
 
 def test_block_style():
@@ -139,6 +146,73 @@ def test_write_json_read_json_round_trip_is_byte_identical():
         reloaded = mp.read_json(str(first))
         mp.write_json(reloaded, filename=str(second))
         assert first.read_bytes() == second.read_bytes()
+
+
+def test_assign_channels_shares_channels_past_the_15_non_drum_limit():
+    """Regression for a latent hang: assign_channels used to increment an
+    unbounded counter looking for a free non-drum channel, which never
+    terminates once all 15 (MIDI has 16 channels total, minus channel 9 for
+    drums) are taken. 16 non-drum tracks (now possible after the MAX_TRACKS
+    bump) must still terminate, sharing a channel for the 16th."""
+    tracks = [
+        TrackSchema(
+            role="chords",
+            instrument="Acoustic Grand Piano",
+            events=[{"type": "chord", "chord": "C", "bars": 1}],
+        )
+        for _ in range(16)
+    ]
+    channels = assign_channels(tracks)
+    assert len(channels) == 16
+    assert 9 not in channels
+    assert all(0 <= c <= 15 for c in channels)
+    # first 15 tracks get 15 distinct channels; the 16th shares one
+    assert len(set(channels[:15])) == 15
+    assert channels[15] in channels[:15]
+
+
+def test_assign_channels_respects_explicit_channels_and_drums():
+    tracks = [
+        TrackSchema(role="drums", instrument="Standard", drum_pattern="K, H"),
+        TrackSchema(
+            role="chords", instrument="Acoustic Grand Piano", channel=3,
+            events=[{"type": "chord", "chord": "C", "bars": 1}],
+        ),
+        TrackSchema(
+            role="bass", instrument="Acoustic Bass",
+            events=[{"type": "chord", "chord": "C", "bars": 1}],
+        ),
+    ]
+    channels = assign_channels(tracks)
+    assert channels[0] == 9
+    assert channels[1] == 3
+    assert channels[2] not in (3, 9)
+
+
+def test_track_bar_length_sums_chord_and_note_events():
+    track = TrackSchema(
+        role="chords",
+        instrument="Acoustic Grand Piano",
+        events=[
+            {"type": "chord", "chord": "C", "bars": 1.5},
+            {"type": "note", "duration": "1/4", "rest": True},
+        ],
+    )
+    assert track_bar_length(track) == pytest.approx(1.75)
+
+
+def test_track_bar_length_computes_real_raw_event_duration():
+    track = TrackSchema(
+        role="melody",
+        instrument="Flute",
+        events=[{"type": "raw", "notes": "C5[.4;.4], D5[.4;.4], E5[.4;.4]"}],
+    )
+    assert track_bar_length(track) == pytest.approx(0.75)
+
+
+def test_track_bar_length_zero_for_drums():
+    track = TrackSchema(role="drums", instrument="Standard", drum_pattern="K, H")
+    assert track_bar_length(track) == 0.0
 
 
 def test_other_messages_never_shared_for_directly_constructed_chords():

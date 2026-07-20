@@ -22,7 +22,7 @@ from fractions import Fraction
 import musicpy as mp
 
 from leadsheet import capabilities
-from leadsheet.schema import ChordEvent, NoteEvent, PieceSchema, RawEvent, TrackSchema
+from leadsheet.schema import ChordEvent, NoteEvent, PieceSchema, RawEvent, TrackSchema, parse_fraction
 
 
 def to_float(value: str | int | float) -> float:
@@ -137,6 +137,27 @@ def compile_event(event: ChordEvent | NoteEvent | RawEvent) -> "mp.chord":
     return compile_raw_event(event)
 
 
+def track_bar_length(track: TrackSchema) -> float:
+    """The track's true total bar length for one pass (before `repeat`),
+    computed from real event data. Unlike schema.py's cheap structural
+    guardrail sums, this also accounts for RawEvent by actually compiling
+    its note-string via musicpy -- the only way to know a raw note-string's
+    real duration (schema.py can't do this itself without a circular
+    import on this module). Used by theory_check.py for the always-on
+    track-length report and the opt-in `expected_bars` assertion."""
+    if not track.events:
+        return 0.0
+    total = 0.0
+    for event in track.events:
+        if isinstance(event, ChordEvent):
+            total += event.bars
+        elif isinstance(event, NoteEvent):
+            total += float(parse_fraction(event.duration, "duration"))
+        else:
+            total += compile_raw_event(event).bars()
+    return total
+
+
 def compile_track(track: TrackSchema) -> "mp.chord":
     if track.role == "drums":
         d = mp.drum(pattern=track.drum_pattern, i=resolve_instrument(track.instrument, drums=True))
@@ -151,10 +172,15 @@ def compile_track(track: TrackSchema) -> "mp.chord":
     return base * track.repeat if track.repeat > 1 else base
 
 
+# MIDI has 16 channels total; channel 9 is reserved for drums, leaving 15
+# for everything else.
+NON_DRUM_CHANNELS = [c for c in range(16) if c != 9]
+
+
 def assign_channels(tracks: list[TrackSchema]) -> list[int]:
     used = {t.channel for t in tracks if t.channel is not None}
     channels = []
-    next_channel = 0
+    cursor = 0
     for track in tracks:
         if track.channel is not None:
             channels.append(track.channel)
@@ -162,11 +188,19 @@ def assign_channels(tracks: list[TrackSchema]) -> list[int]:
         if track.role == "drums":
             channels.append(9)
             continue
-        while next_channel in used or next_channel == 9:
-            next_channel += 1
-        channels.append(next_channel)
-        used.add(next_channel)
-        next_channel += 1
+        # Prefer an unused channel; once all 15 non-drum channels are
+        # taken (more than 15 auto-assigned non-drum tracks), wrap around
+        # and share one -- legal MIDI, not ideal, but bounded, unlike the
+        # unbounded increment this used to do.
+        candidate = NON_DRUM_CHANNELS[cursor % len(NON_DRUM_CHANNELS)]
+        for _ in range(len(NON_DRUM_CHANNELS)):
+            if candidate not in used:
+                break
+            cursor += 1
+            candidate = NON_DRUM_CHANNELS[cursor % len(NON_DRUM_CHANNELS)]
+        channels.append(candidate)
+        used.add(candidate)
+        cursor += 1
     return channels
 
 

@@ -72,3 +72,98 @@ def test_invalid_schema_returns_errors_and_skips_semantic_checks():
     assert result.errors
     assert result.warnings == []
     assert result.detected_chords == []
+
+
+def test_track_lengths_always_reported_for_chord_events():
+    schema = {
+        "bpm": 100,
+        "tracks": [
+            {
+                "role": "chords",
+                "instrument": "Acoustic Grand Piano",
+                "events": [
+                    {"type": "chord", "chord": "C", "bars": 1},
+                    {"type": "chord", "chord": "G", "bars": 0.5},
+                ],
+            }
+        ],
+    }
+    result = validate(schema)
+    assert result.valid
+    assert result.track_lengths == [{"track": 0, "name": None, "bars": 1.5}]
+
+
+def test_track_lengths_computes_real_raw_event_duration():
+    """This is the actual pain point: a raw: track's real duration can only
+    be known by asking musicpy to parse the note-string -- confirms that
+    happens (5 quarter notes = 1.25 bars, not the 0 a naive structural sum
+    would give RawEvent, and not silently ignored)."""
+    schema = {
+        "bpm": 100,
+        "tracks": [
+            {
+                "role": "melody",
+                "instrument": "Trumpet",
+                "events": [
+                    {"type": "raw", "notes": "C5[.4;.4], D5[.4;.4], E5[.4;.4], F5[.4;.4], G5[.4;.4]"}
+                ],
+            }
+        ],
+    }
+    result = validate(schema)
+    assert result.valid
+    assert result.track_lengths == [{"track": 0, "name": None, "bars": 1.25}]
+
+
+def test_track_lengths_skips_drum_tracks():
+    schema = {
+        "bpm": 100,
+        "tracks": [
+            {"role": "drums", "instrument": "Standard", "drum_pattern": "K, H, S, H"},
+        ],
+    }
+    result = validate(schema)
+    assert result.valid
+    assert result.track_lengths == []
+
+
+def test_expected_bars_matching_the_real_computed_length_passes():
+    schema = {
+        "bpm": 100,
+        "tracks": [
+            {
+                "role": "chords",
+                "instrument": "Acoustic Grand Piano",
+                "expected_bars": 2,
+                "events": [
+                    {"type": "chord", "chord": "C", "bars": 1},
+                    {"type": "chord", "chord": "G", "bars": 1},
+                ],
+            }
+        ],
+    }
+    result = validate(schema)
+    assert result.valid
+
+
+def test_expected_bars_mismatch_is_a_hard_error():
+    """The exact failure mode this exists for: a drifted raw: note-string
+    no longer silently reports valid=True."""
+    schema = {
+        "bpm": 100,
+        "tracks": [
+            {
+                "role": "melody",
+                "instrument": "Trumpet",
+                "expected_bars": 8,
+                "events": [{"type": "raw", "notes": "C5[.4;.4], D5[.4;.4], E5[.4;.4]"}],
+            }
+        ],
+    }
+    result = validate(schema)
+    assert result.valid is False
+    assert len(result.errors) == 1
+    assert "expected_bars=8" in result.errors[0]
+    assert "0.75 bars" in result.errors[0]
+    # track_lengths is still reported alongside the error, for diagnosis
+    assert result.track_lengths == [{"track": 0, "name": None, "bars": 0.75}]

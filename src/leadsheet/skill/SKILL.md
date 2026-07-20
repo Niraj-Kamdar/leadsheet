@@ -32,7 +32,13 @@ the B2 grammar below.
 3. For anything non-trivial, call `validate(path=...)` first. It runs
    structural checks plus a semantic cross-check of every chord against
    musicpy's own chord-theory detector, and is much cheaper than a full
-   `compose` (no compiling/rendering).
+   `compose` (no compiling/rendering). It always returns `track_lengths`
+   (every non-drum track's real computed bar length) -- glance at it
+   whenever tracks are meant to line up (e.g. a melody that should span the
+   same 8 bars as the chords underneath it); a `raw:` track's duration is
+   easy to get wrong by hand and nothing else will catch a drift. Use a
+   `bars=<n>` header modifier (see below) to turn that into a hard error
+   instead of something you have to notice yourself.
 4. Call `compose(path=...)`. If it returns `{"ok": false, "errors": [...]}`,
    fix the `.leadsheet` file and retry -- nothing was compiled, rendered, or
    saved. If it returns warnings (e.g. a chord-detection mismatch), read
@@ -51,10 +57,10 @@ the B2 grammar below.
 
 ## The B2 DSL
 
-Line-oriented, one statement per line. Every line is one of five kinds,
-distinguished by its first token. Field *values* are always spelled out in
-full (`oct=2`, `subdiv=1/8`, never a glued shorthand) -- terser field
-*names* are fine, ambiguous field *values* are not.
+Line-oriented, one statement per line, distinguished by its first token.
+Field *values* are always spelled out in full (`oct=2`, `subdiv=1/8`, never
+a glued shorthand) -- terser field *names* are fine, ambiguous field
+*values* are not.
 
 ### 1. Top-level line (exactly one, first non-blank line)
 
@@ -68,7 +74,7 @@ actually in that key yourself.
 ### 2. Track header line
 
 ```
-<role> "<instrument>" [name="<string>"] [start=<bar>] [vol=<0-127>] [repeat=<n>] ...
+<role> "<instrument>" [name="<string>"] [start=<bar>] [vol=<0-127>] [repeat=<n>] [bars=<n>] ...
 ```
 - `role` is one of `chords | bass | melody | drums | custom`, bare and
   unquoted -- drives which `style` values make musical sense, but doesn't
@@ -81,8 +87,14 @@ actually in that key yourself.
   it starts on (default 0), track volume (0-127), and how many times to
   repeat the whole compiled track (e.g. a 1-bar 4-token drum pattern with
   `repeat=8` to fill 8 bars).
+- `bars=<n>` (optional, not valid on `drums` tracks) asserts this track's
+  events should sum to exactly `n` bars -- `validate`/`compose` hard-error
+  with the real computed length if they don't, instead of silently
+  compiling something shorter/longer than intended. Cheap insurance on any
+  track whose length matters relative to its siblings (e.g. a countermelody
+  that must span the same 8 bars as the chords under it).
 - What follows the header modifiers depends on the track's content -- see
-  the three forms below. A header line always ends with exactly one `:`.
+  the forms below. A header line always ends with exactly one `:`.
 
 **Chord-list segment** (chords/bass/melody/custom tracks) -- a run of
 chord events sharing one style/modifiers:
@@ -98,7 +110,14 @@ chord events sharing one style/modifiers:
   `pattern=[1,2,1,1,2,1,1,2]` (`1`,`2`,`3`... = chord tones 1-based; `2.1` =
   tone 2 up an octave; `-1.2` = tone 1 down two octaves).
 - `<chord-list>` is a space-separated list of bare chord symbols (`Am7`,
-  `Cmaj7`, `F5(+octave)`, `C/E`) -- every chord in the list gets 1 bar.
+  `Cmaj7`, `F5(+octave)`, `C/E`) -- every chord gets 1 bar by default.
+  - Append `*<bars>` to override that for one chord, e.g. `Am7*0.5` for a
+    half-bar harmonic push, or `C*2` for a chord that rings two bars --
+    a plain decimal or an `<a>/<b>` fraction, either works.
+  - The bare token `r` (optionally `r*<bars>`) is a **rest**: silence for
+    that duration instead of a chord. Use it to make a chords/brass/custom
+    track punctuate sparsely (hit, then go quiet) instead of faking
+    silence with volume or register.
 - If the track's events aren't style-homogeneous (e.g. 8 bars of
   `custom_pattern` chug, then 4 bars of ringing `block` chords), end the
   header in a bare `:` with nothing after it, then follow with one or more
@@ -135,6 +154,45 @@ snare, `OH` = open hi-hat, `C`/`C2` = crash/ride, `0` = rest), e.g.
   ```
   melody "Violin" notes: E5@1/4 r@1/8 G5@1/4
   ```
+
+**Macros** -- define a phrase once, reuse it anywhere in the file (a
+different track, a different instrument, later in the piece):
+
+```
+define <name> [style] [subdiv=<frac>] [oct=<n>] [pattern=[<index-list>]] [vel=<0-127>]: <chord-list>
+define <name> raw: <notes>
+define <name> notes: <tok>@<frac> ...
+define <name>: <token-list>          # inferred as a drum pattern -- see below
+```
+- `<name>` is a bare identifier (letters/digits/underscore), and `define`
+  only makes sense between tracks (not inside an open multi-segment track).
+  Its content is exactly one of the shapes above -- whichever a track
+  header could use in that position -- captured verbatim, including any
+  style/modifiers. A plain `K, H, S, H`-shaped comma list (no style prefix)
+  is inferred as a drum pattern, since chord-lists are always
+  space-separated and drum-token-lists are always comma-separated.
+  **Important**: don't put a `:` right after `<name>` unless the content is
+  a bare chord-list -- `define riff raw: ...` (no colon on the name), not
+  `define riff: raw: ...` (that `:` ends the header before `raw:` is ever
+  seen). Only `define <name>:` (name directly colon-terminated) is correct
+  when there's no style/raw/notes keyword, e.g. `define riff: C G Am F`.
+- `use: <name> [x<n>]` replays that captured content wherever a chord-list
+  segment could go: inline on a track header, as one of several segment
+  lines, or as a `drums` track's token list. `x<n>` (default 1) repeats the
+  expansion -- for a drum pattern that's the token list repeated, for
+  everything else it's the events repeated. Kind-checked against where it's
+  used (a drum-pattern macro only works in a `drums` position, everything
+  else only works in a non-`drums` position); using an undefined name is a
+  clear error. No nested macros -- a `define` body can't itself `use:`
+  another macro.
+  ```
+  define villain_motif raw: C4[1;1], Eb4[1;1], G4[1;1]
+  melody "Trumpet" name="villain (brass)" start=16 use: villain_motif
+  melody "Violin" name="villain (strings)" start=32 use: villain_motif x2
+  ```
+  This is how a reprised motif on a different instrument, or an escalating
+  drum groove across sections, stays a one-line reference instead of being
+  retyped in full every time it recurs.
 
 `style` per role (call `list_capabilities` for the exact list, this is the gist):
 
@@ -225,6 +283,26 @@ chords "Electric Piano 1" custom_pattern pattern=[1,2,3,4,3.1,2.1,1.1] subdiv=1/
 melody "Violin" notes: E5@1/4 r@1/8 G5@1/4
 ```
 
+## Worked example: cinematic cue -- sub-bar chords, a rest, bars=, and a reused motif
+
+Orchestral/cinematic writing is the case that motivated `*<bars>`, the `r`
+rest token, `bars=`, and `define`/`use`: a half-bar harmonic push, brass
+that punctuates instead of sustaining, and a short villain motif stated on
+one instrument and restated (doubled, longer) on another later on. Compiles
+and renders with zero warnings; `compose`'s `track_lengths` for this piece
+confirms the two `bars=4` tracks really are 4 bars, and shows the two motif
+statements at 3 and 6 bars (3 notes once, 3 notes twice) without having to
+count `[1;1]` triplets by hand.
+
+```
+bpm=90 title="battle cue"
+define villain_motif raw: C4[1;1], Eb4[1;1], G4[1;1]
+chords "Pad 3 (polysynth)" bars=4 block: Cm*0.5 r*0.5 Ab*2 Eb
+custom "Trumpet" name="stab" bars=4 block: r*3 Cm*1
+melody "Electric Guitar (clean)" name="motif (lead)" start=4 use: villain_motif
+custom "Viola" name="motif (strings, doubled)" start=4 use: villain_motif x2
+```
+
 ## Non-instructions
 
 - Never write musicpy Python code directly, and never use the
@@ -239,3 +317,9 @@ melody "Violin" notes: E5@1/4 r@1/8 G5@1/4
 - Don't try to hand-roll a merge-patch or partial update -- there is no
   `revise` tool. Edit the `.leadsheet` file directly and call `compose`
   again.
+- Don't put a `:` right after a macro's `<name>` in `define` if its content
+  is `raw:`/`notes:`/a styled chord-list -- that `:` becomes the header
+  terminator before the real content keyword is ever seen (`define riff
+  raw: ...`, not `define riff: raw: ...`; see Macros above).
+- `bars=<n>` isn't valid on a `drums` track -- there's no `events` list for
+  it to check against.

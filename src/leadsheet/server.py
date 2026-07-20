@@ -79,7 +79,12 @@ def _compose(text: str, source_path: Path, output_dir: str | None) -> dict:
     except (audio.AudioUnavailable, audio.AudioRenderError) as exc:
         return {"ok": False, "errors": [str(exc)]}
 
-    return {"ok": True, "path": str(target_path), "warnings": warnings}
+    return {
+        "ok": True,
+        "path": str(target_path),
+        "warnings": warnings,
+        "track_lengths": validation.track_lengths,
+    }
 
 
 @mcp_app.tool()
@@ -89,7 +94,11 @@ def validate(path: str) -> dict:
     Reads `path`, parses the B2 DSL, and runs structural validation (field
     types, chord/instrument names, guardrail limits) plus, if that passes, a
     semantic cross-check of every chord event against musicpy's own
-    chord-theory detector. Never compiles or renders audio -- returns
+    chord-theory detector. The response always includes `track_lengths`
+    (every non-drum track's real computed bar length, including `raw:`
+    tracks -- use it to eyeball whether tracks that should line up actually
+    do); a track header's optional `bars=<n>` is checked against this and
+    is a hard error on mismatch. Never compiles or renders audio -- returns
     immediately. Call this before `compose` for anything non-trivial.
     """
     try:
@@ -111,7 +120,8 @@ def compose(path: str, output_dir: str | None = None) -> dict:
     returns the errors immediately without compiling or rendering anything.
     If valid, deterministically compiles it into a musicpy piece, renders,
     tags, and saves an mp3 next to `path` (or in `output_dir` if given), and
-    returns its path along with any theory-check warnings.
+    returns its path along with any theory-check warnings and
+    `track_lengths` (see `validate`).
 
     For a follow-up edit ("make it slower", "change the second chord"),
     edit the `.leadsheet` file directly and call `compose` again -- there is

@@ -25,6 +25,7 @@ numbers here are just so you recognize them in `list_capabilities` output.
 | Lo-fi | 70-90 | `Jazz Kit` | see SKILL.md's worked lo-fi example |
 | Reggaeton | 88-96 | `TR-808 Kit` | dembow drum pattern, minor-loop chords |
 | EDM | 122-130 | `Electronic Kit` | four-on-the-floor kick, sawtooth lead arpeggio |
+| Cinematic / orchestral | 60-100 (varies a lot by cue) | sparse, or none | sub-bar chords (`*<bars>`), chord/brass rests (`r`), motif reuse via `define`/`use` |
 
 ## Structuring longer, multi-section pieces
 
@@ -263,3 +264,41 @@ melody "Lead 2 (sawtooth)" name="lead" arpeggio_updown subdiv=1/16 oct=5: Am F C
 bass "Synth Bass 2" name="bass" root_only oct=2: Am F C G
 drums "Electronic Kit" name="drums" repeat=4: K, H, H, H, K, H, OH, H
 ```
+
+## Cinematic / orchestral
+
+The odd genre out here: no fixed drum kit, no signature groove -- the
+signature moves are grammar mechanics rather than instrument/pattern picks,
+because orchestral writing needs things a 4-8 track pop/rock arrangement
+doesn't:
+
+- **Sub-bar harmonic changes.** A chord-list token's default is 1 bar; a
+  battle cue's harmonic pushes are often faster than that. Append
+  `*<bars>` to any token, e.g. `Cm*0.5` for a chord that lasts half a bar --
+  see SKILL.md's B2 grammar reference.
+- **Brass/strings that punctuate instead of sustain.** The bare token `r`
+  (optionally `r*<bars>`) in a chord-list is a rest -- a stab-and-silence
+  brass line is `block: r*3 Cm*1`, not four chords in a row with the
+  volume faked down.
+- **A motif stated once, reprised later on a different instrument.**
+  `define <name> ...` once, then `use: <name> [x<n>]` wherever it recurs --
+  a villain motif on solo trumpet, then doubled on strings two minutes
+  later, is two `use:` lines, not the motif's note-string retyped twice.
+- **More tracks than a pop arrangement needs** (strings split, brass,
+  woodwinds, choir, percussion, several motif tracks) -- `MAX_TRACKS` is
+  higher than the pop-corpus default suggests; call `list_capabilities` if
+  you need the current exact limit.
+- **Verifying a track's length wasn't guessed wrong by hand.** `bars=<n>`
+  on any track header (except `drums`) hard-errors if its events don't sum
+  to exactly `n` bars -- cheap insurance on a `raw:` countermelody that's
+  supposed to span the same length as the cue underneath it. Even without
+  `bars=`, `validate`/`compose` always report every track's real computed
+  length in `track_lengths` -- glance at it before presenting a piece where
+  several tracks are meant to line up.
+
+Progressions lean on borrowed/modal color more than pop's diatonic
+triads -- minor-key loops with a borrowed bVI/bVII (`Cm-Ab-Eb-Bb`), or a
+static pedal under shifting upper-structure chords, both read as
+"cinematic" more readily than a plain I-IV-V. See SKILL.md's own "cinematic
+cue" worked example for all of the above combined in one short, validated
+piece (compiles, renders, zero warnings).

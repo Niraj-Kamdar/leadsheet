@@ -1,15 +1,18 @@
 """Structural validation (Pydantic) + semantic/theory validation
-(musicpy's own chord-type detector cross-check), combined into the
-ValidationResult shared by the `validate` and `compose` tools.
+(musicpy's own chord-type detector cross-check plus real-duration track
+length reporting), combined into the ValidationResult shared by the
+`validate` and `compose` tools.
 """
 
 from __future__ import annotations
+
+import math
 
 import musicpy as mp
 from musicpy import database
 from pydantic import ValidationError
 
-from leadsheet import capabilities
+from leadsheet import capabilities, compiler
 from leadsheet.schema import ChordEvent, PieceSchema, ValidationResult
 
 
@@ -68,6 +71,19 @@ def check_chord_event(track_index: int, event_index: int, event: ChordEvent) -> 
     return entry, warning
 
 
+def compute_track_lengths(schema: PieceSchema) -> list[dict]:
+    """Every non-drum track's real bar length (one pass, before `repeat`),
+    via compiler.track_bar_length -- always computed, not opt-in, so a
+    drifted raw:/notes: track is visible in every validate()/compose()
+    response instead of only failing silently at render time."""
+    lengths = []
+    for idx, track in enumerate(schema.tracks):
+        if not track.events:
+            continue
+        lengths.append({"track": idx, "name": track.name, "bars": compiler.track_bar_length(track)})
+    return lengths
+
+
 def check_semantics(schema: PieceSchema) -> tuple[list[str], list[dict]]:
     warnings: list[str] = []
     detected_chords: list[dict] = []
@@ -83,11 +99,35 @@ def check_semantics(schema: PieceSchema) -> tuple[list[str], list[dict]]:
     return warnings, detected_chords
 
 
+def _check_expected_bars(schema: PieceSchema, track_lengths: list[dict]) -> list[str]:
+    actual_by_index = {entry["track"]: entry["bars"] for entry in track_lengths}
+    errors = []
+    for idx, track in enumerate(schema.tracks):
+        if track.expected_bars is None:
+            continue
+        actual = actual_by_index.get(idx)
+        if actual is None:
+            continue
+        if not math.isclose(actual, track.expected_bars, rel_tol=1e-9, abs_tol=1e-9):
+            errors.append(
+                f"tracks.{idx}: expected_bars={track.expected_bars} but this track's "
+                f"events actually sum to {actual} bars"
+            )
+    return errors
+
+
 def validate(schema_dict: dict) -> ValidationResult:
     try:
         schema = PieceSchema(**schema_dict)
     except ValidationError as exc:
         return ValidationResult(valid=False, errors=_format_pydantic_errors(exc))
 
+    track_lengths = compute_track_lengths(schema)
+    bars_errors = _check_expected_bars(schema, track_lengths)
+    if bars_errors:
+        return ValidationResult(valid=False, errors=bars_errors, track_lengths=track_lengths)
+
     warnings, detected_chords = check_semantics(schema)
-    return ValidationResult(valid=True, warnings=warnings, detected_chords=detected_chords)
+    return ValidationResult(
+        valid=True, warnings=warnings, detected_chords=detected_chords, track_lengths=track_lengths
+    )

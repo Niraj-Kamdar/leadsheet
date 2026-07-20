@@ -33,6 +33,23 @@ async def test_validate_returns_valid_result(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_validate_reports_track_lengths(tmp_path):
+    path = _write(tmp_path, SAMPLE_B2)
+    result = await server.mcp_app.call_tool("validate", {"path": str(path)})
+    data = json.loads(_text_block(result).text)
+    assert data["track_lengths"] == [{"track": 0, "name": None, "bars": 2.0}]
+
+
+@pytest.mark.asyncio
+async def test_validate_expected_bars_mismatch_is_a_hard_error(tmp_path):
+    path = _write(tmp_path, 'bpm=90\nchords "Electric Piano 1" bars=99 block: Am7 Dm7\n')
+    result = await server.mcp_app.call_tool("validate", {"path": str(path)})
+    data = json.loads(_text_block(result).text)
+    assert data["valid"] is False
+    assert "expected_bars=99" in data["errors"][0]
+
+
+@pytest.mark.asyncio
 async def test_validate_reports_dsl_syntax_errors(tmp_path):
     path = _write(tmp_path, "not a valid first line\n")
     result = await server.mcp_app.call_tool("validate", {"path": str(path)})
@@ -71,6 +88,27 @@ async def test_compose_saves_tagged_mp3_next_to_source(tmp_path):
     assert data["path"] == str(saved)
     assert saved.exists()
     assert saved.stat().st_size > 0
+    assert data["track_lengths"] == [{"track": 0, "name": None, "bars": 2.0}]
+
+
+@requires_fluidsynth
+@pytest.mark.asyncio
+async def test_compose_compiles_sub_bar_chords_rests_and_macros(tmp_path):
+    """End-to-end proof the three new grammar mechanisms actually compile
+    and render, not just parse -- a sub-bar chord, a chord-list rest, and a
+    motif defined once and used on two different tracks."""
+    text = (
+        'bpm=100 title="cinematic snippet"\n'
+        'define villain_motif raw: C4[1;1], Eb4[1;1], G4[1;1]\n'
+        'chords "Distortion Guitar" block: Am7*0.5 r*0.5 Dm7\n'
+        'melody "Trumpet" name="brass" use: villain_motif\n'
+        'melody "Violin" name="strings" use: villain_motif x2\n'
+    )
+    path = _write(tmp_path, text)
+    result = await server.mcp_app.call_tool("compose", {"path": str(path)})
+    data = json.loads(_text_block(result).text)
+    assert data["ok"] is True
+    assert (tmp_path / "cinematic-snippet.mp3").exists()
 
 
 @requires_fluidsynth

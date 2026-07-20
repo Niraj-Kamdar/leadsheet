@@ -187,6 +187,40 @@ def test_over_limit_bars_is_a_hard_error_with_actual_value():
         PieceSchema(**piece)
 
 
+def test_expected_bars_must_be_positive():
+    piece = _piece(
+        tracks=[
+            {
+                "role": "chords",
+                "instrument": "Acoustic Grand Piano",
+                "expected_bars": 0,
+                "events": [{"type": "chord", "chord": "Am7", "bars": 1}],
+            }
+        ]
+    )
+    with pytest.raises(ValidationError, match="greater than 0"):
+        PieceSchema(**piece)
+
+
+def test_expected_bars_defaults_to_none_and_is_not_checked_by_pydantic():
+    # The actual expected_bars-vs-computed-length check lives in
+    # theory_check.py (it needs a RawEvent's real compiled duration, which
+    # this pure-Pydantic schema can't compute) -- PieceSchema itself just
+    # stores whatever value is given, mismatched or not.
+    piece = _piece(
+        tracks=[
+            {
+                "role": "chords",
+                "instrument": "Acoustic Grand Piano",
+                "expected_bars": 999,
+                "events": [{"type": "chord", "chord": "Am7", "bars": 1}],
+            }
+        ]
+    )
+    schema = PieceSchema(**piece)
+    assert schema.tracks[0].expected_bars == 999
+
+
 def test_note_event_requires_note_unless_rest():
     piece = _piece(
         tracks=[

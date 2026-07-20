@@ -101,3 +101,7 @@ uv run pytest
 
 Audio-pipeline tests that need `fluidsynth` are skipped automatically if
 it isn't installed in the dev environment.
+
+## License
+
+AGPL-3.0-or-later -- see [LICENSE](LICENSE).

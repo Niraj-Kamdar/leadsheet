@@ -89,3 +89,26 @@ def render_mp3(midi_bytes: bytes) -> bytes:
             step="ffmpeg mp3 encode",
         )
         return mp3_path.read_bytes()
+
+
+def remux_and_tag_mp3(mp3_bytes: bytes, target_path: Path, *, title: str, artist: str, comment: str) -> None:
+    """Losslessly remuxes (`-c copy`) mp3 bytes straight to `target_path`
+    while embedding ID3 tags in the same step -- the step V1's SKILL.md
+    used to make the calling model run by hand after every compose."""
+    if not ffmpeg_available():
+        raise AudioUnavailable("ffmpeg is not installed -- required to save the rendered audio.")
+    with tempfile.TemporaryDirectory() as tmp:
+        src_path = Path(tmp) / "rendered.mp3"
+        src_path.write_bytes(mp3_bytes)
+        _run(
+            [
+                "ffmpeg", "-y",
+                "-i", str(src_path),
+                "-c", "copy",
+                "-metadata", f"title={title}",
+                "-metadata", f"artist={artist}",
+                "-metadata", f"comment={comment}",
+                str(target_path),
+            ],
+            step="ffmpeg remux/tag",
+        )

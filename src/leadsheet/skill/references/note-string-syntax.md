@@ -1,9 +1,9 @@
-# The RawEvent note-string mini-language
+# The raw: note-string mini-language
 
-This is musicpy's own note-string syntax, valid **only** inside a
-`RawEvent.notes` string (`{"type": "raw", "notes": "..."}`). It is the
-recommended way to write melody tracks, since chord-symbol events can only
-produce chord tones and can't express real melodic motion.
+This is musicpy's own note-string syntax, valid **only** after a B2 melody
+track's `raw:` keyword (e.g. `melody "Flute" raw: E5[.4;.4], r[.4]`). It is
+the recommended way to write melody tracks, since chord-symbol events can
+only produce chord tones and can't express real melodic motion.
 
 ## Basic shape
 

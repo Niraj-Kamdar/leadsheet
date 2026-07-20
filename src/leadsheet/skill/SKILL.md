@@ -1,6 +1,6 @@
 ---
 name: leadsheet
-description: Compose real, playable music (chord progressions, bass lines, melodies, drum patterns) as MIDI + an audio preview, via the local leadsheet MCP server. Use whenever the user asks to write a song, chord progression, backing track, melody, drum beat, jingle, or otherwise generate/compose music in any genre or mood.
+description: Compose real, playable music (chord progressions, bass lines, melodies, drum patterns) and save it as a tagged mp3, via the local leadsheet MCP server. Use whenever the user asks to write a song, chord progression, backing track, melody, drum beat, jingle, or otherwise generate/compose music in any genre or mood.
 ---
 
 # leadsheet: composing music with the leadsheet MCP server
@@ -8,15 +8,15 @@ description: Compose real, playable music (chord progressions, bass lines, melod
 leadsheet lets you compose real music without writing a single line of
 musicpy's operator-heavy Python (`@`, `%`, `^`, `&`, arpeggio index-golf).
 You do the musical/creative reasoning -- what chords, what mood, what
-instruments, what structure -- and express it as a small JSON object (the
-**PieceSchema**, defined below). The `leadsheet` MCP server validates it,
-deterministically compiles it into real musicpy objects, cross-checks the
-result against musicpy's own chord-theory detector, renders a MIDI file and
-an audio preview, and returns everything inline.
+instruments, what structure -- and write it as a compact line-oriented DSL
+(**B2**, defined below) in a `.leadsheet` file. The `leadsheet` MCP server
+reads that file, validates it, deterministically compiles it into real
+musicpy objects, cross-checks the result against musicpy's own chord-theory
+detector, renders a tagged mp3 preview, and saves it to disk.
 
 **Never write musicpy Python code.** Everything you need to express --
 chords, arpeggios, walking bass, drum patterns, melodies -- has a place in
-the schema below.
+the B2 grammar below.
 
 ## Workflow
 
@@ -27,137 +27,154 @@ the schema below.
    guardrail limits) computed straight from musicpy's registries. Don't
    guess a chord suffix's casing (`Fmaj7` is valid, `FMaj7` is not) --
    look it up if in doubt.
-2. For anything non-trivial, call `validate` first. It runs structural
-   checks plus a semantic cross-check of every chord against musicpy's own
-   chord-theory detector, and is much cheaper than a full `compose` (no
-   compiling/rendering).
-3. Call `compose` with the full `PieceSchema`. If it returns errors, fix
-   them and retry -- nothing was compiled or rendered. If it returns
-   warnings (e.g. a chord-detection mismatch), read them: they usually mean
-   real voicing/enharmonic ambiguity, but reconsider the flagged chord
-   before presenting the result to the user.
-4. Present the returned audio preview to the user. Keep the returned
-   `normalized_schema` in mind for follow-ups.
-5. For a follow-up edit ("make it slower", "change the second chord",
-   "swap the bass instrument"), use `revise` with a small JSON Merge Patch
-   (RFC 7386) against the *previous* `normalized_schema`, rather than
-   resending the whole piece. **Important:** RFC 7386 patches replace
-   arrays wholesale, they do not merge into array elements -- `tracks` and
-   each track's `events` are arrays, so to change one field on one chord
-   you must send the complete `tracks` array (copied from the prior
-   `normalized_schema`) with just that one field edited, not a
-   partial/sparse track object. The `revise` tool's own description
-   repeats this with an example.
-6. **Final step of every successful `compose`/`revise` call: save the mp3
-   output to a real file.** Do this every time, not just once at the end of
-   an iteration loop -- the inline preview is how the user *hears* the
-   piece, it isn't the deliverable; the saved file is. The tool result's
-   audio content block gets saved by the harness to a throwaway path as an
-   unlabeled `.bin` file (reported in the tool result, e.g. a line like
-   `[Audio from leadsheet] Binary content (audio/mp3, ...) saved to
-   <tmp-path>`) -- turn that into a real file immediately after presenting
-   the preview:
-   - **Target directory**: if the user named an output directory/path
-     (anywhere in the conversation, not just the current message), save
-     there -- create it first if it doesn't exist. Otherwise default to the
-     current working directory.
-   - Pick a kebab-case filename from the piece's `title` (or a short 2-4
-     word description of the piece if untitled), e.g. `lofi-study-break.mp3`.
-     If that name already exists in the target directory, append `-2`,
-     `-3`, etc. rather than overwriting -- each `revise` iteration is a
-     distinct version, not a replacement of the last one.
-   - Run `ffmpeg -y -i <tmp-path> -c copy -metadata title="<title>"
-     -metadata artist="leadsheet" -metadata comment="<bpm> BPM<, key if
-     set>" "<target-dir>/<slug>.mp3"`. `-c copy` remuxes losslessly (no
-     re-encoding) while fixing the container/extension and embedding ID3
-     tags in the same step -- ffmpeg is already a hard dependency of this
-     server's own audio pipeline, so treat it as available.
-   - Discard the MIDI resource -- there's no need to save or move it
-     anywhere; the mp3 is the only deliverable.
-   - Confirm the file landed (e.g. `ls`) and tell the user its final path.
+2. Write the piece as B2 text (see below) to a `.leadsheet` file with your
+   own Write tool.
+3. For anything non-trivial, call `validate(path=...)` first. It runs
+   structural checks plus a semantic cross-check of every chord against
+   musicpy's own chord-theory detector, and is much cheaper than a full
+   `compose` (no compiling/rendering).
+4. Call `compose(path=...)`. If it returns `{"ok": false, "errors": [...]}`,
+   fix the `.leadsheet` file and retry -- nothing was compiled, rendered, or
+   saved. If it returns warnings (e.g. a chord-detection mismatch), read
+   them: they usually mean real voicing/enharmonic ambiguity, but reconsider
+   the flagged chord before presenting the result to the user.
+5. On success, `compose` has already rendered, tagged, and saved an mp3 --
+   its path is in the result (`{"ok": true, "path": "...", "warnings": []}`),
+   next to the `.leadsheet` file by default, or under `output_dir` if you
+   passed one. There's no separate save step and nothing to run by hand --
+   just tell the user where the file landed.
+6. For a follow-up edit ("make it slower", "change the second chord", "swap
+   the bass instrument"), edit the same `.leadsheet` file with your Edit
+   tool -- a precise, targeted change -- and call `compose(path=...)` again.
+   There is no `revise` tool and no merge-patch mechanism; the file on disk
+   is always the source of truth.
 
-## The schema (PieceSchema)
+## The B2 DSL
 
-Top level:
+Line-oriented, one statement per line. Every line is one of five kinds,
+distinguished by its first token. Field *values* are always spelled out in
+full (`oct=2`, `subdiv=1/8`, never a glued shorthand) -- terser field
+*names* are fine, ambiguous field *values* are not.
 
-| field | type | notes |
-|---|---|---|
-| `title` | string, optional | |
-| `bpm` | number, required | must be > 0 |
-| `key` | string, optional | e.g. `"A minor"` -- **informational only**, not used by the compiler. It is not enforced -- you must pick chords that are actually in that key yourself. |
-| `tracks` | array of Track, required | 1..8 tracks |
+### 1. Top-level line (exactly one, first non-blank line)
 
-Track:
+```
+bpm=<number> [title="<string>"] [key="<string>"]
+```
+`bpm` is required; `title`/`key` are optional. `key` (e.g. `"A minor"`) is
+**informational only** -- it is not enforced, you must pick chords that are
+actually in that key yourself.
 
-| field | type | notes |
-|---|---|---|
-| `name` | string, optional | |
-| `role` | `"chords" \| "bass" \| "melody" \| "drums" \| "custom"` | required -- drives which `style` values make sense (see below) |
-| `instrument` | string or int | GM instrument name (call `list_capabilities` for the list) or 1-128. For `role == "drums"`, this is a **drum-kit name** instead (e.g. `"Standard"`, `"Jazz Kit"`) -- a different registry than melodic instruments. |
-| `channel` | int 0-15, optional | omit it -- the server auto-assigns channels and reserves channel 9 for drums. Only set it if you have a specific reason. |
-| `start_bar` | number, default 0 | when this track begins, in bars |
-| `volume` | int 0-127, optional | applied to the whole track |
-| `repeat` | int, default 1 | repeats the whole compiled track (e.g. a 4-note drum pattern with `repeat: 8` to fill 8 bars) |
-| `events` | array of Event | required unless `role == "drums"` |
-| `drum_pattern` | string | required iff `role == "drums"`; a musicpy drum-pattern string (see Drums below), forbidden otherwise |
+### 2. Track header line
 
-Event -- one of three shapes, picked by `type`:
+```
+<role> "<instrument>" [name="<string>"] [start=<bar>] [vol=<0-127>] [repeat=<n>] ...
+```
+- `role` is one of `chords | bass | melody | drums | custom`, bare and
+  unquoted -- drives which `style` values make musical sense, but doesn't
+  otherwise restrict what a track can contain.
+- `instrument` is the **full canonical GM instrument name or drum-kit
+  name** (e.g. `"Distortion Guitar"`, `"Power Kit"`), quoted because it may
+  contain spaces/parens -- call `list_capabilities` if unsure of the exact
+  spelling. An int (1-128) also works, unquoted.
+- `name=`, `start=`, `vol=`, `repeat=` are all optional: track name, the bar
+  it starts on (default 0), track volume (0-127), and how many times to
+  repeat the whole compiled track (e.g. a 1-bar 4-token drum pattern with
+  `repeat=8` to fill 8 bars).
+- What follows the header modifiers depends on the track's content -- see
+  the three forms below. A header line always ends with exactly one `:`.
 
-**`ChordEvent`** (`type: "chord"`) -- the main way to write chords/bass:
+**Chord-list segment** (chords/bass/melody/custom tracks) -- a run of
+chord events sharing one style/modifiers:
 
-| field | notes |
-|---|---|
-| `chord` | a chord symbol, e.g. `"Am7"`, `"Cmaj7"`, `"G7sus4"`, `"C/E"`. Case-sensitive suffix. |
-| `octave` | root-pitch octave, default 3 |
-| `bars` | required, > 0 -- how many bars this chord spans |
-| `style` | see the table below |
-| `pattern` | required iff `style == "custom_pattern"`, forbidden otherwise. A list of note indices: `1`, `2`, `3`... = chord tones 1-based; `2.1` = tone 2 up one octave; `-1.2` = tone 1 down two octaves. |
-| `subdivision` | e.g. `"1/8"` -- optional override, see per-style defaults below |
-| `note_duration` | optional override, see per-style defaults below |
-| `velocity` | 0-127, default 100 |
+```
+<role> "<instrument>" [header modifiers] [style] [subdiv=<frac>] [oct=<n>] [pattern=[<index-list>]] [vel=<0-127>]: <chord-list>
+```
+- `style` is one of `block | arpeggio_up | arpeggio_updown | custom_pattern
+  | root_only | root_fifth | walking`, bare -- omit for the schema default
+  (`block`).
+- `subdiv=`, `oct=`, `vel=` apply to every chord in the list. `pattern=[...]`
+  (only with `style=custom_pattern`) is a literal note-index list, e.g.
+  `pattern=[1,2,1,1,2,1,1,2]` (`1`,`2`,`3`... = chord tones 1-based; `2.1` =
+  tone 2 up an octave; `-1.2` = tone 1 down two octaves).
+- `<chord-list>` is a space-separated list of bare chord symbols (`Am7`,
+  `Cmaj7`, `F5(+octave)`, `C/E`) -- every chord in the list gets 1 bar.
+- If the track's events aren't style-homogeneous (e.g. 8 bars of
+  `custom_pattern` chug, then 4 bars of ringing `block` chords), end the
+  header in a bare `:` with nothing after it, then follow with one or more
+  indented **segment lines**, each its own `[style] [modifiers]: <chord-list>`
+  -- they concatenate in order. See the Metal example below.
+- Melody tracks can use this same chord-list mechanism too (an arpeggiated
+  lead line is just a chords-style track with `role=melody`) -- see
+  Chiptune/EDM in `references/genre-recipes.md`.
+
+**Drum line** (`role=drums` only, always a single line, never segments):
+
+```
+drums "<kit name>" [name=...] [start=...] [repeat=...]: <token-list>
+```
+`<token-list>` is a comma-separated list of drum tokens from
+`list_capabilities` (`K` = kick, `H` = closed hi-hat, `S`/`S2` = snare/alt
+snare, `OH` = open hi-hat, `C`/`C2` = crash/ride, `0` = rest), e.g.
+`K, H, S, H` for a basic 8th-note beat over 1 bar.
+
+**Melody lines** -- two compact forms for the two non-chord event shapes:
+
+- `raw:` -- musicpy's native note-string mini-language, passed through
+  **verbatim**, character-for-character. **This is the recommended way to
+  write real melody** -- chord-symbol events can only produce chord tones,
+  they can't express real melodic motion.
+  ```
+  melody "<instrument>" [name="..."] raw: E5[.4;.4], r[.4], C5[.4;.4], D5[.4;.4]
+  ```
+  Full syntax reference: `references/note-string-syntax.md` in this skill
+  (read it when you need it, don't try to write melody from memory).
+- `notes:` -- a compact fallback for a handful of discrete notes/rests, one
+  `<note>@<fraction>` or `r@<fraction>` token per note (`@` binds a note to
+  its duration, e.g. `E5@1/4`, `r@1/8`):
+  ```
+  melody "Violin" notes: E5@1/4 r@1/8 G5@1/4
+  ```
 
 `style` per role (call `list_capabilities` for the exact list, this is the gist):
 
-| style | typical role | what it does | subdivision default | note_duration default |
+| style | typical role | what it does | subdiv default | note-length default |
 |---|---|---|---|---|
-| `block` | chords | one sustained stab (or a gentle strum if you set `subdivision`) | 0 | subdivision, or `bars` if subdivision is 0 |
-| `arpeggio_up` | chords | ascending arpeggio, tiled to fill `bars` | 1/8 | 2x subdivision (legato/overlap) |
-| `arpeggio_updown` | chords | up-then-down arpeggio, tiled to fill `bars` | 1/8 | 2x subdivision |
-| `custom_pattern` | chords, melody | your own `pattern` list, used verbatim (not tiled) | 1/8 | 2x subdivision |
-| `root_only` | bass | single sustained root note | n/a (= `bars`) | n/a |
-| `root_fifth` | bass | alternating root/fifth, the classic bass pattern | `bars`/2 | = subdivision |
-| `walking` | bass | deterministic root-third-fifth-approach walking line (not random) | `bars`/4 | = subdivision |
+| `block` | chords | one sustained stab (or a gentle strum if you set `subdiv=`) | 0 | subdiv, or the chord's own bar count if subdiv is 0 |
+| `arpeggio_up` | chords, melody | ascending arpeggio, tiled to fill the bar | 1/8 | 2x subdiv (legato/overlap) |
+| `arpeggio_updown` | chords, melody | up-then-down arpeggio, tiled to fill the bar | 1/8 | 2x subdiv |
+| `custom_pattern` | chords, melody | your own `pattern=` list, used verbatim (not tiled) | 1/8 | 2x subdiv |
+| `root_only` | bass | single sustained root note | n/a | n/a |
+| `root_fifth` | bass | alternating root/fifth, the classic bass pattern | half the bar | = subdiv |
+| `walking` | bass | deterministic root-third-fifth-approach walking line (not random) | quarter the bar | = subdiv |
 
-**`NoteEvent`** (`type: "note"`) -- a single note or rest:
+### Worked example: Metal (the hardest case in the corpus -- multi-section, doubled track, mid-track style switch, staggered entrance)
 
-| field | notes |
-|---|---|
-| `note` | e.g. `"E5"` -- required unless `rest: true` |
-| `duration` | required, e.g. `"1/4"` or `0.25` |
-| `rest` | if true, this is a rest of `duration` bars |
-| `velocity` | 0-127, default 100 |
-
-Verbose for a whole melody line -- prefer `RawEvent` for melody (below).
-
-**`RawEvent`** (`type: "raw"`) -- musicpy's native note-string mini-language,
-passed through verbatim: `notes: "E5[.4;.4], r[.4], C5[.4;.4], D5[.4;.4]"`.
-**This is the recommended way to write melody tracks** -- chord-symbol
-events flatten everything to chord tones, which can't express real melodic
-motion. Full syntax reference: `references/note-string-syntax.md` in this
-skill (read it when you need it, don't try to write melody from memory).
-
-### Drums
-
-`drum_pattern` is a comma/`|`-separated string of drum tokens from
-`list_capabilities`' `drum_tokens` (e.g. `K` = kick, `H` = closed hi-hat,
-`S` = snare, `S2` = alt snare, `OH` = open hi-hat, `C`/`C2` = crash/ride).
-Example: `"K, H, S, H, K, H, S, H"` for a basic 8th-note beat over 1 bar.
-Use `repeat` to tile a short pattern across the whole piece (e.g. an 8-bar
-piece with a 1-bar, 4-token pattern needs `repeat: 8`).
+```
+bpm=130
+chords "Distortion Guitar" name="rhythm guitar":
+  custom_pattern pattern=[1,2,1,1,2,1,1,2] subdiv=1/8 oct=2: E5 G5 A5 C5 E5 G5 A5 C5
+  block subdiv=1/4 oct=2: F5(+octave) G5(+octave) C5(+octave) G5(+octave)
+custom "Distortion Guitar" name="rhythm guitar (doubled low)" vol=90:
+  custom_pattern pattern=[1,2,1,1,2,1,1,2] subdiv=1/8 oct=1: E5 G5 A5 C5 E5 G5 A5 C5
+  block subdiv=1/4 oct=1: F5(+octave) G5(+octave) C5(+octave) G5(+octave)
+melody "Electric Guitar (clean)" name="lead" start=8 raw: E5[1;1], D5[1;1], C5[1;1], D5[1;1]
+bass "Electric Bass (pick)" name="bass" root_only oct=1: E5 G5 A5 C5 E5 G5 A5 C5 F5 G5 C5 G5
+drums "Power Kit" name="verse drums" repeat=8: K, H, S, H, K, K, S, H
+drums "Power Kit" name="chorus drums" start=8 repeat=2: K, H, S, H, K, H, S, H, K, H, S, H, K, S2, S2, S2
+```
+Every technique for longer, multi-section pieces falls out of the mechanisms
+above: a track's events just concatenate in order (verse-then-chorus is one
+track's segment lines back to back), a doubled/thickened layer is a second
+track with the same chord list at a different `oct=`, a lead entering partway
+through is `start=<bar>` on its own track, and section-specific drum grooves
+are separate `drums` lines with their own `start=`. See
+`references/genre-recipes.md` for more genre-specific instrument picks and
+`style`/`pattern=` tricks.
 
 ## Music theory guidance
 
-- `key` is informational only -- the compiler does not constrain your chord
+- `key=` is informational only -- the compiler does not constrain your chord
   choices to it. You are responsible for picking chords that are actually
   in-key (or deliberately, tastefully out of key).
 - Common progressions by feel:
@@ -168,12 +185,12 @@ piece with a 1-bar, 4-token pattern needs `repeat: 8`).
   - blues: `I7-IV7-I7-V7-IV7-I7` (dominant 7ths throughout).
 - Role-to-style pairing that reads as a real arrangement: chords track ->
   `block` or `arpeggio_updown`; bass track -> `root_fifth` or `walking`;
-  melody track -> `RawEvent` note-strings; drums -> a short `drum_pattern`
-  with `repeat` to fill the piece.
+  melody track -> a `raw:` note-string; drums -> a short drum-token list
+  with `repeat=` to fill the piece.
 - 7th/9th/sus chords read as far more "produced" than plain triads --
   reach for `maj7`/`m7`/`7`/`sus4`/`add9` etc. rather than bare major/minor
   unless the user asked for something simple/folky.
-- For genre-specific instrument picks, `style`/`pattern` tricks (e.g. metal's
+- For genre-specific instrument picks, `style`/`pattern=` tricks (e.g. metal's
   palm-muted power-chord chug, chiptune's fast arpeggios, reggaeton's dembow
   drum pattern), and validated worked examples covering rock, metal,
   chiptune/8-bit/16-bit/retro, acoustic guitar, pop, lo-fi, reggaeton, and
@@ -184,130 +201,41 @@ piece with a 1-bar, 4-token pattern needs `repeat: 8`).
 ## Worked example: lo-fi progression (validated end-to-end -- compiles,
 renders, and passes the chord-theory cross-check with zero warnings)
 
-```json
-{
-  "title": "lofi study break",
-  "bpm": 85,
-  "key": "A minor",
-  "tracks": [
-    {
-      "name": "chords",
-      "role": "chords",
-      "instrument": "Electric Piano 1",
-      "events": [
-        {"type": "chord", "chord": "Am7", "octave": 3, "bars": 1, "style": "arpeggio_updown"},
-        {"type": "chord", "chord": "Dm7", "octave": 3, "bars": 1, "style": "arpeggio_updown"},
-        {"type": "chord", "chord": "G7", "octave": 3, "bars": 1, "style": "arpeggio_updown"},
-        {"type": "chord", "chord": "Cmaj7", "octave": 3, "bars": 1, "style": "arpeggio_updown"},
-        {"type": "chord", "chord": "Fmaj7", "octave": 3, "bars": 1, "style": "arpeggio_updown"},
-        {"type": "chord", "chord": "Em7", "octave": 3, "bars": 1, "style": "arpeggio_updown"},
-        {"type": "chord", "chord": "Am7", "octave": 3, "bars": 1, "style": "arpeggio_updown"},
-        {"type": "chord", "chord": "G7sus4", "octave": 3, "bars": 1, "style": "arpeggio_updown"}
-      ]
-    },
-    {
-      "name": "bass",
-      "role": "bass",
-      "instrument": "Acoustic Bass",
-      "events": [
-        {"type": "chord", "chord": "Am7", "octave": 2, "bars": 1, "style": "root_fifth"},
-        {"type": "chord", "chord": "Dm7", "octave": 2, "bars": 1, "style": "root_fifth"},
-        {"type": "chord", "chord": "G7", "octave": 2, "bars": 1, "style": "root_fifth"},
-        {"type": "chord", "chord": "Cmaj7", "octave": 2, "bars": 1, "style": "root_fifth"},
-        {"type": "chord", "chord": "Fmaj7", "octave": 2, "bars": 1, "style": "root_fifth"},
-        {"type": "chord", "chord": "Em7", "octave": 2, "bars": 1, "style": "root_fifth"},
-        {"type": "chord", "chord": "Am7", "octave": 2, "bars": 1, "style": "root_fifth"},
-        {"type": "chord", "chord": "G7sus4", "octave": 2, "bars": 1, "style": "root_fifth"}
-      ]
-    },
-    {
-      "name": "melody",
-      "role": "melody",
-      "instrument": "Flute",
-      "events": [
-        {"type": "raw", "notes": "E5[.4;.4], r[.4], C5[.4;.4], D5[.4;.4], E5[.2;.2], r[.4], A4[.4;.4], C5[.4;.4], B4[.2;.2], r[.2], G4[.4;.4], A4[.4;.4], B4[.4;.4], C5[.2;.2], r[.2], A4[.2;.2], G4[.2;.2], E4[.2;.2]"}
-      ]
-    },
-    {
-      "name": "drums",
-      "role": "drums",
-      "instrument": "Standard",
-      "drum_pattern": "K, H, S, H",
-      "repeat": 8
-    }
-  ]
-}
+```
+bpm=85 title="lofi study break" key="A minor"
+chords "Electric Piano 1" name="chords" arpeggio_updown oct=3: Am7 Dm7 G7 Cmaj7 Fmaj7 Em7 Am7 G7sus4
+bass "Acoustic Bass" name="bass" root_fifth oct=2: Am7 Dm7 G7 Cmaj7 Fmaj7 Em7 Am7 G7sus4
+melody "Flute" name="melody" raw: E5[.4;.4], r[.4], C5[.4;.4], D5[.4;.4], E5[.2;.2], r[.4], A4[.4;.4], C5[.4;.4], B4[.2;.2], r[.2], G4[.4;.4], A4[.4;.4], B4[.4;.4], C5[.2;.2], r[.2], A4[.2;.2], G4[.2;.2], E4[.2;.2]
+drums "Standard" name="drums" repeat=8: K, H, S, H
 ```
 
 ## Worked example: upbeat pop progression, block chords + walking bass
 
-```json
-{
-  "bpm": 118,
-  "tracks": [
-    {
-      "role": "chords",
-      "instrument": "Acoustic Grand Piano",
-      "events": [
-        {"type": "chord", "chord": "C", "bars": 1, "style": "block", "subdivision": "1/4"},
-        {"type": "chord", "chord": "G", "bars": 1, "style": "block", "subdivision": "1/4"},
-        {"type": "chord", "chord": "Am", "bars": 1, "style": "block", "subdivision": "1/4"},
-        {"type": "chord", "chord": "F", "bars": 1, "style": "block", "subdivision": "1/4"}
-      ]
-    },
-    {
-      "role": "bass",
-      "instrument": "Electric Bass (finger)",
-      "events": [
-        {"type": "chord", "chord": "C", "octave": 2, "bars": 1, "style": "walking"},
-        {"type": "chord", "chord": "G", "octave": 2, "bars": 1, "style": "walking"},
-        {"type": "chord", "chord": "Am", "octave": 2, "bars": 1, "style": "walking"},
-        {"type": "chord", "chord": "F", "octave": 2, "bars": 1, "style": "walking"}
-      ]
-    }
-  ]
-}
+```
+bpm=118
+chords "Acoustic Grand Piano" block subdiv=1/4: C G Am F
+bass "Electric Bass (finger)" walking oct=2: C G Am F
 ```
 
-## Worked example: a custom_pattern arpeggio and a NoteEvent rest
+## Worked example: a custom_pattern arpeggio and a note rest
 
-```json
-{
-  "bpm": 100,
-  "tracks": [
-    {
-      "role": "chords",
-      "instrument": "Electric Piano 1",
-      "events": [
-        {
-          "type": "chord", "chord": "Cmaj7", "bars": 1, "style": "custom_pattern",
-          "pattern": [1, 2, 3, 4, 3.1, 2.1, 1.1],
-          "subdivision": "1/8"
-        }
-      ]
-    },
-    {
-      "role": "melody",
-      "instrument": "Violin",
-      "events": [
-        {"type": "note", "note": "E5", "duration": "1/4"},
-        {"type": "note", "duration": "1/8", "rest": true},
-        {"type": "note", "note": "G5", "duration": "1/4"}
-      ]
-    }
-  ]
-}
+```
+bpm=100
+chords "Electric Piano 1" custom_pattern pattern=[1,2,3,4,3.1,2.1,1.1] subdiv=1/8: Cmaj7
+melody "Violin" notes: E5@1/4 r@1/8 G5@1/4
 ```
 
 ## Non-instructions
 
 - Never write musicpy Python code directly, and never use the
   `[duration;interval;volume]` note-string mini-language anywhere except
-  inside a `RawEvent.notes` string.
+  after a `raw:` keyword.
 - Never guess a chord-type suffix's casing or a GM instrument/drum-kit
   spelling -- call `list_capabilities` if unsure.
-- Don't put a `pattern` field on a `ChordEvent` unless `style ==
-  "custom_pattern"` -- it's a hard validation error otherwise.
-- Don't set `channel: 9` on anything except a `role: "drums"` track.
-- `key` does not constrain the compiler -- don't rely on it to keep you
+- Don't set `pattern=[...]` on a segment unless its `style` is
+  `custom_pattern` -- it's a hard validation error otherwise.
+- `key=` does not constrain the compiler -- don't rely on it to keep you
   in-key; choose the chords yourself.
+- Don't try to hand-roll a merge-patch or partial update -- there is no
+  `revise` tool. Edit the `.leadsheet` file directly and call `compose`
+  again.

@@ -1,4 +1,4 @@
-"""The local stdio MCP server: compose / validate / revise / list_capabilities.
+"""The local stdio MCP server: compose / validate / list_capabilities.
 
 Run via `python -m leadsheet.server` (what `leadsheet setup` registers with
 `claude mcp add`). Transport is stdio only for v1 -- no HTTP, no auth.
@@ -14,138 +14,114 @@ import os
 # audio device (e.g. this server spawned headless by Claude Code).
 os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
 
-import base64
+import re
+from pathlib import Path
 
-import mcp.types as types
 import musicpy as mp
 from mcp.server.fastmcp import FastMCP
-from mcp.server.fastmcp.utilities.types import Audio
 
-from leadsheet import audio, capabilities, compiler, limits, theory_check
-from leadsheet.schema import ComposeResult, PieceSchema
+from leadsheet import audio, capabilities, compiler, dsl, theory_check
+from leadsheet.schema import PieceSchema
 
 mcp_app = FastMCP("leadsheet")
 
 
-def _merge_patch(target, patch):
-    """RFC 7386 JSON Merge Patch."""
-    if not isinstance(patch, dict):
-        return patch
-    if not isinstance(target, dict):
-        target = {}
-    result = dict(target)
-    for key, value in patch.items():
-        if value is None:
-            result.pop(key, None)
-        else:
-            result[key] = _merge_patch(result.get(key), value)
-    return result
+def _slugify(title: str | None) -> str:
+    if not title:
+        return "untitled"
+    slug = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")
+    return slug or "untitled"
 
 
-def _compose(schema_dict: dict) -> list:
-    validation = theory_check.validate(schema_dict)
+def _unique_path(directory: Path, slug: str) -> Path:
+    candidate = directory / f"{slug}.mp3"
+    n = 2
+    while candidate.exists():
+        candidate = directory / f"{slug}-{n}.mp3"
+        n += 1
+    return candidate
+
+
+def _compose(text: str, source_path: Path, output_dir: str | None) -> dict:
+    try:
+        parsed = dsl.parse_dsl(text)
+    except dsl.DslSyntaxError as exc:
+        return {"ok": False, "errors": [str(exc)]}
+
+    validation = theory_check.validate(parsed)
     if not validation.valid:
-        return [validation.model_dump()]
+        return {"ok": False, "errors": validation.errors}
 
-    piece_schema = PieceSchema(**schema_dict)
+    piece_schema = PieceSchema(**parsed)
     warnings = list(validation.warnings)
 
     piece_obj = compiler.compile_piece(piece_schema)
     midi_bytes = mp.write(piece_obj, bpm=piece_schema.bpm, save_as_file=False).getvalue()
 
-    mp3_bytes = None
     try:
         mp3_bytes = audio.render_mp3(midi_bytes)
-    except audio.AudioUnavailable as exc:
-        warnings.append(f"audio preview not rendered: {exc}")
-    except audio.AudioRenderError as exc:
-        warnings.append(f"audio rendering failed: {exc}")
+    except (audio.AudioUnavailable, audio.AudioRenderError) as exc:
+        return {"ok": False, "errors": [str(exc)]}
 
-    if mp3_bytes is not None:
-        payload_size = len(base64.b64encode(mp3_bytes))
-        if payload_size > limits.MAX_PAYLOAD_BYTES:
-            warnings.append(
-                f"rendered audio ({payload_size} base64 bytes) exceeds MAX_PAYLOAD_BYTES "
-                f"({limits.MAX_PAYLOAD_BYTES}) -- shorten the piece to get an inline audio "
-                "preview; MIDI is still returned."
-            )
-            mp3_bytes = None
+    target_dir = Path(output_dir) if output_dir else source_path.parent
+    target_dir.mkdir(parents=True, exist_ok=True)
+    target_path = _unique_path(target_dir, _slugify(piece_schema.title))
 
-    result = ComposeResult(
-        warnings=warnings,
-        detected_chords=validation.detected_chords,
-        normalized_schema=piece_schema.model_dump(),
-    )
-
-    content: list = [result.model_dump()]
-    if mp3_bytes is not None:
-        content.append(Audio(data=mp3_bytes, format="mp3"))
-    content.append(
-        types.EmbeddedResource(
-            type="resource",
-            resource=types.BlobResourceContents(
-                uri="leadsheet://compose/output.mid",
-                mimeType="audio/midi",
-                blob=base64.b64encode(midi_bytes).decode(),
-            ),
+    comment = f"{piece_schema.bpm} BPM" + (f", {piece_schema.key}" if piece_schema.key else "")
+    try:
+        audio.remux_and_tag_mp3(
+            mp3_bytes,
+            target_path,
+            title=piece_schema.title or "Untitled",
+            artist="leadsheet",
+            comment=comment,
         )
-    )
-    return content
+    except (audio.AudioUnavailable, audio.AudioRenderError) as exc:
+        return {"ok": False, "errors": [str(exc)]}
+
+    return {"ok": True, "path": str(target_path), "warnings": warnings}
 
 
 @mcp_app.tool()
-def validate(schema: dict) -> dict:
-    """Validate a leadsheet PieceSchema JSON object.
+def validate(path: str) -> dict:
+    """Validate a `.leadsheet` B2 DSL file.
 
-    Runs structural validation (field types, chord/instrument names,
-    guardrail limits) and, if that passes, a semantic cross-check of every
-    chord event against musicpy's own chord-theory detector. Never compiles
-    or renders audio -- returns immediately. Call this before `compose` for
-    anything non-trivial, and always after a `revise` patch you're unsure
-    about.
+    Reads `path`, parses the B2 DSL, and runs structural validation (field
+    types, chord/instrument names, guardrail limits) plus, if that passes, a
+    semantic cross-check of every chord event against musicpy's own
+    chord-theory detector. Never compiles or renders audio -- returns
+    immediately. Call this before `compose` for anything non-trivial.
     """
-    return theory_check.validate(schema).model_dump()
+    try:
+        text = Path(path).read_text()
+    except OSError as exc:
+        return {"valid": False, "errors": [str(exc)]}
+    try:
+        parsed = dsl.parse_dsl(text)
+    except dsl.DslSyntaxError as exc:
+        return {"valid": False, "errors": [str(exc)]}
+    return theory_check.validate(parsed).model_dump()
 
 
 @mcp_app.tool()
-def compose(schema: dict) -> list:
-    """Compile a leadsheet PieceSchema into real music.
+def compose(path: str, output_dir: str | None = None) -> dict:
+    """Compile a `.leadsheet` B2 DSL file into real music.
 
-    Validates the schema (see `validate`); if invalid, returns the
-    validation errors immediately without compiling or rendering anything.
-    If valid, deterministically compiles it into a musicpy piece, renders a
-    MIDI file and (if fluidsynth is installed) an mp3 audio preview, and
-    returns both inline along with any theory-check warnings and the
-    normalized schema (carry this into `revise` rather than your original
-    possibly-under-specified input).
+    Reads and parses `path`, validates it (see `validate`); if invalid,
+    returns the errors immediately without compiling or rendering anything.
+    If valid, deterministically compiles it into a musicpy piece, renders,
+    tags, and saves an mp3 next to `path` (or in `output_dir` if given), and
+    returns its path along with any theory-check warnings.
+
+    For a follow-up edit ("make it slower", "change the second chord"),
+    edit the `.leadsheet` file directly and call `compose` again -- there is
+    no separate revise tool.
     """
-    return _compose(schema)
-
-
-@mcp_app.tool()
-def revise(base_schema: dict, patch: dict) -> list:
-    """Apply a small change to a previously composed piece and recompose it.
-
-    `patch` is an RFC 7386 JSON Merge Patch applied to `base_schema` (which
-    should be the `normalized_schema` returned by a prior `compose`/`revise`
-    call). Cheaper and less error-prone than resending the whole piece for
-    a small top-level change, e.g. `{"bpm": 100, "title": "new title"}`.
-
-    IMPORTANT array caveat: RFC 7386 merge patches replace arrays wholesale,
-    they do NOT merge into individual array elements. `tracks` and each
-    track's `events` are arrays, so a patch like
-    `{"tracks": [{"events": [{"chord": "Dm9"}]}]}` does NOT "just change one
-    chord" -- it REPLACES the entire `tracks` array with a single
-    under-specified track object (missing `role`/`instrument`/etc.), which
-    will fail validation. To change one chord, send the complete `tracks`
-    array from `base_schema` with only that one field edited in place, e.g.
-    `{"tracks": <the full tracks array, with events[i].chord changed>}`.
-
-    Runs the exact same validate-then-compose pipeline as `compose` against
-    the patched schema.
-    """
-    merged = _merge_patch(base_schema, patch)
-    return _compose(merged)
+    try:
+        text = Path(path).read_text()
+    except OSError as exc:
+        return {"ok": False, "errors": [str(exc)]}
+    return _compose(text, Path(path), output_dir)
 
 
 @mcp_app.tool()

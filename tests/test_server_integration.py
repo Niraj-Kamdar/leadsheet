@@ -1,32 +1,31 @@
-import copy
 import json
 
 import pytest
 
-from leadsheet import server
+from leadsheet import audio, server
 
-SAMPLE_PIECE = {
-    "bpm": 90,
-    "tracks": [
-        {
-            "role": "chords",
-            "instrument": "Electric Piano 1",
-            "events": [
-                {"type": "chord", "chord": "Am7", "bars": 1, "style": "block"},
-                {"type": "chord", "chord": "Dm7", "bars": 1, "style": "block"},
-            ],
-        }
-    ],
-}
+requires_fluidsynth = pytest.mark.skipif(
+    not audio.audio_available(),
+    reason="fluidsynth/ffmpeg not installed in this environment",
+)
+
+SAMPLE_B2 = 'bpm=90\nchords "Electric Piano 1" block: Am7 Dm7\n'
 
 
 def _text_block(blocks):
     return next(b for b in blocks if b.type == "text")
 
 
+def _write(tmp_path, text, name="piece.leadsheet"):
+    path = tmp_path / name
+    path.write_text(text)
+    return path
+
+
 @pytest.mark.asyncio
-async def test_validate_returns_valid_result():
-    result = await server.mcp_app.call_tool("validate", {"schema": SAMPLE_PIECE})
+async def test_validate_returns_valid_result(tmp_path):
+    path = _write(tmp_path, SAMPLE_B2)
+    result = await server.mcp_app.call_tool("validate", {"path": str(path)})
     data = json.loads(_text_block(result).text)
     assert data["valid"] is True
     assert data["errors"] == []
@@ -34,48 +33,87 @@ async def test_validate_returns_valid_result():
 
 
 @pytest.mark.asyncio
-async def test_validate_reports_structural_errors():
-    result = await server.mcp_app.call_tool("validate", {"schema": {"bpm": -1, "tracks": []}})
+async def test_validate_reports_dsl_syntax_errors(tmp_path):
+    path = _write(tmp_path, "not a valid first line\n")
+    result = await server.mcp_app.call_tool("validate", {"path": str(path)})
     data = json.loads(_text_block(result).text)
     assert data["valid"] is False
     assert data["errors"]
 
 
 @pytest.mark.asyncio
-async def test_compose_returns_midi_and_audio_content_blocks():
-    result = await server.mcp_app.call_tool("compose", {"schema": SAMPLE_PIECE})
-    types_seen = {b.type for b in result}
-    assert "text" in types_seen
-    assert "resource" in types_seen  # the MIDI blob
-    data = json.loads(_text_block(result).text)
-    assert "normalized_schema" in data
-    assert data["normalized_schema"]["tracks"][0]["events"][0]["chord"] == "Am7"
-
-
-@pytest.mark.asyncio
-async def test_compose_returns_errors_immediately_without_compiling():
-    result = await server.mcp_app.call_tool("compose", {"schema": {"bpm": -1, "tracks": []}})
+async def test_validate_reports_structural_errors(tmp_path):
+    path = _write(tmp_path, 'bpm=-1\nchords "Electric Piano 1" block: Zzz9\n')
+    result = await server.mcp_app.call_tool("validate", {"path": str(path)})
     data = json.loads(_text_block(result).text)
     assert data["valid"] is False
-    # no MIDI/audio content blocks -- nothing was compiled or rendered
-    assert {b.type for b in result} == {"text"}
+    assert data["errors"]
 
 
 @pytest.mark.asyncio
-async def test_revise_patches_and_recomposes():
-    composed = await server.mcp_app.call_tool("compose", {"schema": SAMPLE_PIECE})
-    normalized = json.loads(_text_block(composed).text)["normalized_schema"]
+async def test_validate_missing_file(tmp_path):
+    result = await server.mcp_app.call_tool("validate", {"path": str(tmp_path / "nope.leadsheet")})
+    data = json.loads(_text_block(result).text)
+    assert data["valid"] is False
+    assert data["errors"]
 
-    patched_tracks = copy.deepcopy(normalized["tracks"])
-    patched_tracks[0]["events"][0]["chord"] = "Dm9"
 
-    revised = await server.mcp_app.call_tool(
-        "revise", {"base_schema": normalized, "patch": {"tracks": patched_tracks}}
-    )
-    revised_data = json.loads(_text_block(revised).text)
-    assert revised_data["normalized_schema"]["tracks"][0]["events"][0]["chord"] == "Dm9"
-    # confirm it actually differs from the base
-    assert revised_data["normalized_schema"] != normalized
+@requires_fluidsynth
+@pytest.mark.asyncio
+async def test_compose_saves_tagged_mp3_next_to_source(tmp_path):
+    path = _write(tmp_path, 'bpm=90 title="test piece"\nchords "Electric Piano 1" block: Am7 Dm7\n')
+    result = await server.mcp_app.call_tool("compose", {"path": str(path)})
+    types_seen = {b.type for b in result}
+    assert types_seen == {"text"}  # no resource/audio content blocks
+    data = json.loads(_text_block(result).text)
+    assert data["ok"] is True
+    saved = tmp_path / "test-piece.mp3"
+    assert data["path"] == str(saved)
+    assert saved.exists()
+    assert saved.stat().st_size > 0
+
+
+@requires_fluidsynth
+@pytest.mark.asyncio
+async def test_compose_respects_output_dir_and_collision_suffix(tmp_path):
+    path = _write(tmp_path, SAMPLE_B2)
+    out_dir = tmp_path / "out"
+    result1 = await server.mcp_app.call_tool("compose", {"path": str(path), "output_dir": str(out_dir)})
+    data1 = json.loads(_text_block(result1).text)
+    assert data1["ok"] is True
+    assert data1["path"] == str(out_dir / "untitled.mp3")
+
+    result2 = await server.mcp_app.call_tool("compose", {"path": str(path), "output_dir": str(out_dir)})
+    data2 = json.loads(_text_block(result2).text)
+    assert data2["ok"] is True
+    assert data2["path"] == str(out_dir / "untitled-2.mp3")
+
+
+@pytest.mark.asyncio
+async def test_compose_returns_errors_immediately_without_compiling(tmp_path):
+    path = _write(tmp_path, 'bpm=-1\nchords "Electric Piano 1" block: Zzz9\n')
+    result = await server.mcp_app.call_tool("compose", {"path": str(path)})
+    assert {b.type for b in result} == {"text"}
+    data = json.loads(_text_block(result).text)
+    assert data["ok"] is False
+    assert data["errors"]
+
+
+@pytest.mark.asyncio
+async def test_compose_returns_dsl_syntax_errors_immediately(tmp_path):
+    path = _write(tmp_path, "not a valid first line\n")
+    result = await server.mcp_app.call_tool("compose", {"path": str(path)})
+    data = json.loads(_text_block(result).text)
+    assert data["ok"] is False
+    assert data["errors"]
+
+
+@pytest.mark.asyncio
+async def test_compose_missing_file(tmp_path):
+    result = await server.mcp_app.call_tool("compose", {"path": str(tmp_path / "nope.leadsheet")})
+    data = json.loads(_text_block(result).text)
+    assert data["ok"] is False
+    assert data["errors"]
 
 
 @pytest.mark.asyncio

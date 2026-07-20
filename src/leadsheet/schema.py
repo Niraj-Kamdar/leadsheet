@@ -216,9 +216,3 @@ class ValidationResult(BaseModel):
     errors: list[str] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
     detected_chords: list[dict] = Field(default_factory=list)
-
-
-class ComposeResult(BaseModel):
-    warnings: list[str] = Field(default_factory=list)
-    detected_chords: list[dict] = Field(default_factory=list)
-    normalized_schema: dict

@@ -48,6 +48,33 @@ the schema below.
    `normalized_schema`) with just that one field edited, not a
    partial/sparse track object. The `revise` tool's own description
    repeats this with an example.
+6. **Final step of every successful `compose`/`revise` call: save the mp3
+   output to a real file.** Do this every time, not just once at the end of
+   an iteration loop -- the inline preview is how the user *hears* the
+   piece, it isn't the deliverable; the saved file is. The tool result's
+   audio content block gets saved by the harness to a throwaway path as an
+   unlabeled `.bin` file (reported in the tool result, e.g. a line like
+   `[Audio from leadsheet] Binary content (audio/mp3, ...) saved to
+   <tmp-path>`) -- turn that into a real file immediately after presenting
+   the preview:
+   - **Target directory**: if the user named an output directory/path
+     (anywhere in the conversation, not just the current message), save
+     there -- create it first if it doesn't exist. Otherwise default to the
+     current working directory.
+   - Pick a kebab-case filename from the piece's `title` (or a short 2-4
+     word description of the piece if untitled), e.g. `lofi-study-break.mp3`.
+     If that name already exists in the target directory, append `-2`,
+     `-3`, etc. rather than overwriting -- each `revise` iteration is a
+     distinct version, not a replacement of the last one.
+   - Run `ffmpeg -y -i <tmp-path> -c copy -metadata title="<title>"
+     -metadata artist="leadsheet" -metadata comment="<bpm> BPM<, key if
+     set>" "<target-dir>/<slug>.mp3"`. `-c copy` remuxes losslessly (no
+     re-encoding) while fixing the container/extension and embedding ID3
+     tags in the same step -- ffmpeg is already a hard dependency of this
+     server's own audio pipeline, so treat it as available.
+   - Discard the MIDI resource -- there's no need to save or move it
+     anywhere; the mp3 is the only deliverable.
+   - Confirm the file landed (e.g. `ls`) and tell the user its final path.
 
 ## The schema (PieceSchema)
 
@@ -146,6 +173,13 @@ piece with a 1-bar, 4-token pattern needs `repeat: 8`).
 - 7th/9th/sus chords read as far more "produced" than plain triads --
   reach for `maj7`/`m7`/`7`/`sus4`/`add9` etc. rather than bare major/minor
   unless the user asked for something simple/folky.
+- For genre-specific instrument picks, `style`/`pattern` tricks (e.g. metal's
+  palm-muted power-chord chug, chiptune's fast arpeggios, reggaeton's dembow
+  drum pattern), and validated worked examples covering rock, metal,
+  chiptune/8-bit/16-bit/retro, acoustic guitar, pop, lo-fi, reggaeton, and
+  EDM, see `references/genre-recipes.md` in this skill -- read the relevant
+  section before composing in one of those genres rather than guessing at
+  instrument names or drum patterns from memory.
 
 ## Worked example: lo-fi progression (validated end-to-end -- compiles,
 renders, and passes the chord-theory cross-check with zero warnings)

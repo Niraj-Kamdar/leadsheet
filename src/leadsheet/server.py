@@ -95,11 +95,11 @@ def validate(path: str) -> dict:
     types, chord/instrument names, guardrail limits) plus, if that passes, a
     semantic cross-check of every chord event against musicpy's own
     chord-theory detector. The response always includes `track_lengths`
-    (every non-drum track's real computed bar length, including `raw:`
-    tracks -- use it to eyeball whether tracks that should line up actually
-    do); a track header's optional `bars=<n>` is checked against this and
-    is a hard error on mismatch. Never compiles or renders audio -- returns
-    immediately. Call this before `compose` for anything non-trivial.
+    (every non-drum track's real computed bar length) -- use it to eyeball
+    whether tracks that should line up actually do; a track header's
+    optional `bars=<n>` is checked against this and is a hard error on
+    mismatch. Never compiles or renders audio -- returns immediately. Call
+    this before `compose` for anything non-trivial.
     """
     try:
         text = Path(path).read_text()

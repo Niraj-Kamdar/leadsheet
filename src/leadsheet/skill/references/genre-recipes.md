@@ -53,7 +53,7 @@ those docs pieces use are directly available here:
   as weight rather than a second competing lead.
 - **A lead/melody line over the rhythm section** (the J-rock intro examples
   layer guitar + bass + drums + a synth countermelody, staggered in with
-  `start_times`) is just another track, `melody` role with `raw:` content,
+  `start_times`) is just another track, `melody` role with `notes:` content,
   given a `start=` that lines it up with the section you want it to enter on
   (e.g. `start=8` to enter at bar 8, matching where a prior track's chorus
   begins).
@@ -137,7 +137,7 @@ chords "Distortion Guitar" name="rhythm guitar":
 custom "Distortion Guitar" name="rhythm guitar (doubled low)" vol=90:
   custom_pattern pattern=[1,2,1,1,2,1,1,2] subdiv=1/8 oct=1: E5 G5 A5 C5 E5 G5 A5 C5
   block subdiv=1/4 oct=1: F5(+octave) G5(+octave) C5(+octave) G5(+octave)
-melody "Electric Guitar (clean)" name="lead" start=8 raw: E5[1;1], D5[1;1], C5[1;1], D5[1;1]
+melody "Electric Guitar (clean)" name="lead" start=8 notes dur=1: E5 D5 C5 D5
 bass "Electric Bass (pick)" name="bass" root_only oct=1: E5 G5 A5 C5 E5 G5 A5 C5 F5 G5 C5 G5
 drums "Power Kit" name="verse drums" repeat=8: K, H, S, H, K, K, S, H
 drums "Power Kit" name="chorus drums" start=8 repeat=2: K, H, S, H, K, H, S, H, K, H, S, H, K, S2, S2, S2
@@ -153,8 +153,8 @@ chords -- that maps directly onto this grammar's `arpeggio_up`/
 `arpeggio_updown` styles at a fast subdivision (`subdiv=1/16`), which is
 exactly how the source musicpy docs' own "video game 8-bit song style"
 example built its chords. Note this is a `melody`-role track using an
-ordinary chord-list segment (not `raw:`/`notes:`) -- an arpeggiated lead
-line is just a chords-style track.
+ordinary chord-list segment (not `notes:`) -- an arpeggiated lead line is
+just a chords-style track.
 
 - Melody/chords: `"Lead 1 (square)"`, `arpeggio_up` (or `arpeggio_updown`
   for a bouncier feel), `subdiv=1/16`.
@@ -203,7 +203,7 @@ example (`I-V-vi-IV`, block piano chords + walking bass). For variety:
 ## Lo-fi
 
 Already covered end-to-end by SKILL.md's own worked lo-fi example
-(`vi-ii-V-I` on electric piano + root-fifth bass + `raw:` flute melody). For
+(`vi-ii-V-I` on electric piano + root-fifth bass + `notes:` flute melody). For
 variety: `"Jazz Kit"` for a softer, brushed drum feel, and 7th/9th chords
 throughout (this genre is the one place reaching for `m9`/`maj9` over plain
 `m7`/`maj7` reads as *more* correct, not less).
@@ -290,7 +290,7 @@ doesn't:
   you need the current exact limit.
 - **Verifying a track's length wasn't guessed wrong by hand.** `bars=<n>`
   on any track header (except `drums`) hard-errors if its events don't sum
-  to exactly `n` bars -- cheap insurance on a `raw:` countermelody that's
+  to exactly `n` bars -- cheap insurance on a `notes:` countermelody that's
   supposed to span the same length as the cue underneath it. Even without
   `bars=`, `validate`/`compose` always report every track's real computed
   length in `track_lengths` -- glance at it before presenting a piece where

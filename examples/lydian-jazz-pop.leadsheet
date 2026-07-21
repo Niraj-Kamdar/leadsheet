@@ -1,0 +1,4 @@
+bpm=100 title="Borrowed Light" key="C major (lydian borrow)"
+chords "Electric Piano 1" name="chords" block subdiv=1/4 oct=3 vel=90: Cmaj7 D7 Fmaj7 Cmaj7/E
+bass "Acoustic Bass" name="bass" walking oct=2 vel=85: Cmaj7 D7 Fmaj7 Cmaj7/E
+melody "Vibraphone" name="melody" notes dur=1/4 vel=95: G5 F5 E5 F5 E5 D5 E5 D5 C5 B4 G4@1/2

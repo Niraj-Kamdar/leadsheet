@@ -1,0 +1,10 @@
+bpm=122 title="Neon Skyline" key="C minor"
+chords "Overdriven Guitar" name="rhythm guitar":
+  block subdiv=1/8 oct=2 vel=95: Cm Bb Ab Bb
+  block subdiv=1/4 oct=3 vel=115: Cm Bb Ab Bb
+bass "Electric Bass (pick)" name="bass":
+  root_only oct=1 vel=90: Cm*1.5 Bb*0.5 Ab*1 Bb*0.5 G*0.5
+  root_fifth oct=1 vel=110: Cm Bb Ab Bb
+melody "Electric Guitar (clean)" name="hook" start=4 notes dur=1/2 vel=100: Eb5 D5 C5 Bb4 Ab4 G4 F4 Eb4
+drums "Power Kit" name="verse drums" repeat=4: K, H, S, H, K, H, S, H
+drums "Power Kit" name="chorus drums" start=4 repeat=4: K, H, S, H, K, S2, S2, S2

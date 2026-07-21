@@ -1,0 +1,4 @@
+bpm=84 title="Cascade" key="C major"
+chords "Orchestral Harp" name="harp" custom_pattern pattern=[1,3,2,4,3,1,4,2] subdiv=1/8 oct=4 vel=85: Cmaj9 Fmaj9
+bass "Contrabass" name="bass" root_only oct=2 vel=70: Cmaj9 Fmaj9
+melody "Celesta" name="sparkle" notes dur=1 vel=70: D6 r

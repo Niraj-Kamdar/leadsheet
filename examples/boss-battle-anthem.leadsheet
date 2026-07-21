@@ -1,0 +1,10 @@
+bpm=160 title="Boss Battle" key="D minor"
+define stab block oct=3 vel=110: Dm7 Dm7
+section intro:
+  chords "Distortion Guitar" custom_pattern pattern=[1,2,1,1,2,1,1,2] subdiv=1/8 oct=2 vel=100: Dm Dm
+  bass "Electric Bass (pick)" root_only oct=1 vel=95: Dm Dm
+  drums "Power Kit" repeat=2: K, H, S, H
+
+use section intro start=0
+melody "Lead 1 (square)" name="hook" start=2 use: stab x2
+use section intro start=4

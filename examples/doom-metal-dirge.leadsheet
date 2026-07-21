@@ -1,0 +1,4 @@
+bpm=32 title="Leviathan's Descent" key="E minor"
+chords "Distortion Guitar" name="riff" block oct=2 vel=100: E5*2 D5*2 C5*2 B5*2
+bass "Electric Bass (pick)" name="bass" root_only oct=1 vel=95: E5*2 D5*2 C5*2 B5*2
+drums "Power Kit" name="drums" repeat=8: K, 0, 0, 0, S, 0, 0, 0

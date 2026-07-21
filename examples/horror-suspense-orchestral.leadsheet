@@ -1,0 +1,5 @@
+bpm=70 title="Hollow Cathedral" key="B minor"
+chords "Tremolo Strings" name="strings" arpeggio_updown subdiv=1/8 oct=3 vel=75: Bm7b5 G7 Cdim7 F#7
+bass "Contrabass" name="bass" root_only oct=1 vel=70: Bm7b5 G7 Cdim7 F#7
+custom "Timpani" name="pulse" block oct=2 vel=90: r*0.75 B*0.25 r*0.75 G*0.25 r*0.75 C*0.25 r*0.75 F#*0.25
+melody "English Horn" name="lament" notes dur=1/2 vel=65: B4 r D5 r C5 r Bb4 r

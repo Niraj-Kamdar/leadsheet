@@ -1,0 +1,4 @@
+bpm=300 title="Redline" key="C minor"
+chords "Lead 2 (sawtooth)" name="stab" arpeggio_up subdiv=1/16 oct=5 vel=110: Cm9 Cm9
+bass "Synth Bass 2" name="bass" root_only oct=2 vel=100: Cm9 Cm9
+drums "TR-808 Kit" name="kick" repeat=2: K, H, K, H, K, H, K, H

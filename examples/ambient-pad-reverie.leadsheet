@@ -1,0 +1,4 @@
+bpm=78 title="Reverie" key="C major"
+chords "Pad 1 (new age)" name="pad" block oct=4 vel=55: CM9 Fmaj9 Am9 Gsus
+bass "Contrabass" name="bass" root_only oct=1 vel=45: CM9 Fmaj9 Am9 Gsus
+melody "Flute" name="air" notes dur=1 vel=60: E5 r C5 r

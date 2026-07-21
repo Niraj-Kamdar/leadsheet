@@ -15,7 +15,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from leadsheet import audio, soundfont
+from leadsheet import __version__, audio, soundfont
 
 SERVER_NAME = "leadsheet"
 
@@ -228,6 +228,7 @@ def cmd_setup(_args: argparse.Namespace) -> int:
 
 
 def cmd_status(_args: argparse.Namespace) -> int:
+    print(f"leadsheet version:  {__version__}")
     print(f"python interpreter: {sys.executable}")
 
     claude_found = claude_available()
@@ -322,12 +323,18 @@ def cmd_uninstall(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_version(_args: argparse.Namespace) -> int:
+    print(f"leadsheet {__version__}")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="leadsheet")
     sub = parser.add_subparsers(dest="command", required=True)
 
     sub.add_parser("setup", help="Register the MCP server and skill with Claude Code (run once after install)")
     sub.add_parser("status", help="Show what's currently configured")
+    sub.add_parser("version", help="Show the leadsheet version")
 
     p_uninstall = sub.add_parser("uninstall", help="Remove the MCP server registration and skill")
     p_uninstall.add_argument("--purge-cache", action="store_true", help="Also delete the cached soundfont")
@@ -338,7 +345,7 @@ def build_parser() -> argparse.ArgumentParser:
 def main() -> None:
     parser = build_parser()
     args = parser.parse_args()
-    handlers = {"setup": cmd_setup, "status": cmd_status, "uninstall": cmd_uninstall}
+    handlers = {"setup": cmd_setup, "status": cmd_status, "uninstall": cmd_uninstall, "version": cmd_version}
     sys.exit(handlers[args.command](args))
 
 

@@ -203,19 +203,25 @@ class PieceSchema(BaseModel):
 
     @model_validator(mode="after")
     def _validate_duration(self) -> "PieceSchema":
-        max_bars = 0.0
-        for track in self.tracks:
-            if not track.events:
-                continue
-            track_bars = _structural_bar_sum(track.events) * track.repeat + track.start_bar
-            max_bars = max(max_bars, track_bars)
-        seconds = max_bars * 4 * 60 / self.bpm
+        seconds = piece_duration_seconds(self)
         if seconds > limits.MAX_DURATION_SECONDS:
             raise ValueError(
                 f"piece exceeds MAX_DURATION_SECONDS ({limits.MAX_DURATION_SECONDS}): "
                 f"estimated {seconds:.1f}s"
             )
         return self
+
+
+def piece_duration_seconds(schema: "PieceSchema") -> float:
+    """The piece's real playback length in seconds, from its longest track
+    (bars * repeat + start_bar), at its bpm."""
+    max_bars = 0.0
+    for track in schema.tracks:
+        if not track.events:
+            continue
+        track_bars = _structural_bar_sum(track.events) * track.repeat + track.start_bar
+        max_bars = max(max_bars, track_bars)
+    return max_bars * 4 * 60 / schema.bpm
 
 
 class ValidationResult(BaseModel):

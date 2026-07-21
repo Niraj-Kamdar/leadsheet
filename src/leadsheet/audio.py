@@ -173,6 +173,18 @@ def render_wav_with_tinysoundfont(midi_bytes: bytes) -> bytes:
         return output.getvalue()
 
 
+def render_and_tag_mp3(midi_bytes: bytes, *, title: str, artist: str, comment: str) -> bytes:
+    """Renders MIDI bytes straight to tagged MP3 bytes, for callers with no
+    filesystem destination of their own (e.g. the hosted container, which
+    uploads the result to object storage instead of writing next to a
+    source file)."""
+    rendered = render_mp3(midi_bytes)
+    with tempfile.TemporaryDirectory() as tmp:
+        target_path = Path(tmp) / "tagged.mp3"
+        remux_and_tag_mp3(rendered, target_path, title=title, artist=artist, comment=comment)
+        return target_path.read_bytes()
+
+
 def remux_and_tag_mp3(mp3_bytes: bytes, target_path: Path, *, title: str, artist: str, comment: str) -> None:
     """Losslessly remuxes (`-c copy`) mp3 bytes straight to `target_path`
     while embedding ID3 tags in the same step -- the step V1's SKILL.md

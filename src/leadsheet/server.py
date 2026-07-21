@@ -17,11 +17,9 @@ os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
 import re
 from pathlib import Path
 
-import musicpy as mp
 from mcp.server.fastmcp import FastMCP
 
-from leadsheet import audio, capabilities, compiler, dsl, theory_check
-from leadsheet.schema import PieceSchema
+from leadsheet import capabilities, dsl, render, theory_check
 
 mcp_app = FastMCP("leadsheet")
 
@@ -42,81 +40,32 @@ def _unique_path(directory: Path, slug: str, suffix: str) -> Path:
     return candidate
 
 
+_SUFFIX_BY_AUDIO_FORMAT = {"mp3": "mp3", "wav": "wav"}
+
+
 def _compose(text: str, source_path: Path, output_dir: str | None) -> dict:
-    try:
-        parsed = dsl.parse_dsl(text)
-    except dsl.DslSyntaxError as exc:
-        return {"ok": False, "errors": [str(exc)]}
-
-    validation = theory_check.validate(parsed)
-    if not validation.valid:
-        return {"ok": False, "errors": validation.errors}
-
-    piece_schema = PieceSchema(**parsed)
-    warnings = list(validation.warnings)
-
-    piece_obj = compiler.compile_piece(piece_schema)
-    midi_bytes = mp.write(piece_obj, bpm=piece_schema.bpm, save_as_file=False).getvalue()
+    result = render.render_piece(text)
+    if not result.dsl_valid:
+        return {"ok": False, "errors": result.errors}
+    if not result.render_ok:
+        return {"ok": False, "errors": [result.render_error]}
 
     target_dir = Path(output_dir) if output_dir else source_path.parent
     target_dir.mkdir(parents=True, exist_ok=True)
-    comment = f"{piece_schema.bpm} BPM" + (f", {piece_schema.key}" if piece_schema.key else "")
-    slug = _slugify(piece_schema.title)
-    response = {
+    slug = _slugify(result.title)
+    suffix = _SUFFIX_BY_AUDIO_FORMAT.get(result.audio_format, "mid")
+    target_path = _unique_path(target_dir, slug, suffix)
+    target_path.write_bytes(result.audio_bytes if result.audio_bytes is not None else result.midi_bytes)
+
+    return {
         "ok": True,
-        "warnings": warnings,
-        "install_hints": [],
-        "track_lengths": validation.track_lengths,
+        "warnings": result.warnings,
+        "install_hints": result.install_hints,
+        "track_lengths": result.track_lengths,
+        "audio_format": result.audio_format,
+        "audio_backend": result.audio_backend,
+        "path": str(target_path),
     }
-
-    try:
-        if audio.fluidsynth_available() and audio.ffmpeg_available():
-            rendered = audio.render_mp3(midi_bytes)
-            target_path = _unique_path(target_dir, slug, "mp3")
-            audio.remux_and_tag_mp3(
-                rendered, target_path, title=piece_schema.title or "Untitled",
-                artist="leadsheet", comment=comment,
-            )
-            response.update(audio_format="mp3", audio_backend="fluidsynth+ffmpeg")
-        elif audio.fluidsynth_available():
-            target_path = _unique_path(target_dir, slug, "wav")
-            target_path.write_bytes(audio.render_wav_with_fluidsynth(midi_bytes))
-            response.update(audio_format="wav", audio_backend="fluidsynth")
-            response["warnings"].append(
-                "FFmpeg not found; saved playable WAV instead of MP3. "
-                "Install ffmpeg for tagged MP3 output."
-            )
-            response["install_hints"].append("Install ffmpeg for tagged MP3 output.")
-        elif audio.tinysoundfont_available():
-            target_path = _unique_path(target_dir, slug, "wav")
-            target_path.write_bytes(audio.render_wav_with_tinysoundfont(midi_bytes))
-            response.update(audio_format="wav", audio_backend="tinysoundfont")
-            response["warnings"].append(
-                "FluidSynth/FFmpeg not found; used the built-in TinySoundFont WAV fallback. "
-                "Install FluidSynth and ffmpeg for the highest-fidelity tagged MP3 output."
-            )
-            response["install_hints"].append(
-                "Install FluidSynth and ffmpeg for the highest-fidelity tagged MP3 output."
-            )
-        else:
-            target_path = _unique_path(target_dir, slug, "mid")
-            target_path.write_bytes(midi_bytes)
-            response.update(audio_format=None, audio_backend=None)
-            response["warnings"].append(
-                "No audio renderer is available; saved MIDI only. "
-                "Install the optional leadsheet audio extra for a zero-system-dependency WAV fallback, "
-                "or install FluidSynth for synthesis and ffmpeg for MP3 encoding."
-            )
-            response["install_hints"].extend([
-                "Install the optional audio fallback with: pip install 'leadsheet[audio]'.",
-                "Install FluidSynth for synthesis.",
-                "Install ffmpeg for MP3 encoding.",
-            ])
-    except (audio.AudioUnavailable, audio.AudioRenderError, OSError) as exc:
-        return {"ok": False, "errors": [str(exc)]}
-
-    response["path"] = str(target_path)
-    return response
 
 
 @mcp_app.tool()

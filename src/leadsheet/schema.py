@@ -82,45 +82,40 @@ class ChordEvent(BaseModel):
 class NoteEvent(BaseModel):
     type: Literal["note"]
     note: str | None = None
+    notes: list[str] | None = None
     duration: FractionLike
+    interval: FractionLike | None = None
     rest: bool = False
     velocity: int = Field(default=100, ge=0, le=127)
 
-    @field_validator("duration")
+    @field_validator("duration", "interval")
     @classmethod
-    def _validate_duration(cls, v):
-        parse_fraction(v, "duration")
+    def _validate_duration_fields(cls, v, info):
+        if v is None:
+            return v
+        parse_fraction(v, info.field_name)
         return v
 
     @model_validator(mode="after")
     def _validate_note_or_rest(self) -> "NoteEvent":
-        if not self.rest and not self.note:
-            raise ValueError("note is required unless rest=True")
+        set_count = int(self.rest) + int(self.note is not None) + int(self.notes is not None)
+        if set_count != 1:
+            raise ValueError("exactly one of rest, note, notes must be set")
         return self
 
 
-class RawEvent(BaseModel):
-    type: Literal["raw"]
-    notes: str = Field(min_length=1)
-
-
-Event = Annotated[Union[ChordEvent, NoteEvent, RawEvent], Field(discriminator="type")]
+Event = Annotated[Union[ChordEvent, NoteEvent], Field(discriminator="type")]
 
 
 def _structural_bar_sum(events: list[Event] | None) -> float:
-    """Sum of ChordEvent.bars/NoteEvent.duration across `events`, ignoring
-    RawEvent -- a raw note-string's real duration can only be known by
-    actually parsing it with musicpy, which this pure-Pydantic module can't
-    do without a circular import on compiler.py. Used only for the cheap
-    structural guardrails below; theory_check.compute_track_lengths does
-    the fuller computation (including RawEvent) for reporting/assertions.
-    """
+    """Sum of ChordEvent.bars/NoteEvent.duration across `events` -- the
+    cheap structural guardrail sum. theory_check.compute_track_lengths does
+    the fuller computation for reporting/assertions."""
     if not events:
         return 0.0
     return float(sum(
         e.bars if isinstance(e, ChordEvent) else parse_fraction(e.duration, "duration")
         for e in events
-        if isinstance(e, (ChordEvent, NoteEvent))
     ))
 
 

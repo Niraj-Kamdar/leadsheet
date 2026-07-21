@@ -22,7 +22,7 @@ from fractions import Fraction
 import musicpy as mp
 
 from leadsheet import capabilities
-from leadsheet.schema import ChordEvent, NoteEvent, PieceSchema, RawEvent, TrackSchema, parse_fraction
+from leadsheet.schema import ChordEvent, NoteEvent, PieceSchema, TrackSchema, parse_fraction
 
 
 def to_float(value: str | int | float) -> float:
@@ -116,45 +116,41 @@ def compile_note_event(event: NoteEvent) -> "mp.chord":
         duration_str = str(Fraction(event.duration).limit_denominator(1024))
         return mp.chord(f"r[{duration_str}]", other_messages=[])
     duration = to_float(event.duration)
+    interval = to_float(event.interval) if event.interval is not None else duration
+    pitches = event.notes if event.notes is not None else [event.note]
+    # Simultaneous pitches (a stack) get interval=0 among themselves so they
+    # share one onset -- only the last pitch carries the real external
+    # interval (the spacing to the *next* melodic token). A single pitch is
+    # just the n=1 case of the same list.
+    intervals = [0] * (len(pitches) - 1) + [interval]
     return mp.chord(
-        [mp.N(event.note)],
+        [mp.N(p) for p in pitches],
         duration=duration,
-        interval=duration,
+        interval=intervals,
         volume=event.velocity,
         other_messages=[],
     )
 
 
-def compile_raw_event(event: RawEvent) -> "mp.chord":
-    return mp.chord(event.notes, other_messages=[])
-
-
-def compile_event(event: ChordEvent | NoteEvent | RawEvent) -> "mp.chord":
+def compile_event(event: ChordEvent | NoteEvent) -> "mp.chord":
     if isinstance(event, ChordEvent):
         return compile_chord_event(event)
-    if isinstance(event, NoteEvent):
-        return compile_note_event(event)
-    return compile_raw_event(event)
+    return compile_note_event(event)
 
 
 def track_bar_length(track: TrackSchema) -> float:
     """The track's true total bar length for one pass (before `repeat`),
-    computed from real event data. Unlike schema.py's cheap structural
-    guardrail sums, this also accounts for RawEvent by actually compiling
-    its note-string via musicpy -- the only way to know a raw note-string's
-    real duration (schema.py can't do this itself without a circular
-    import on this module). Used by theory_check.py for the always-on
-    track-length report and the opt-in `expected_bars` assertion."""
+    computed from real event data. Used by theory_check.py for the
+    always-on track-length report and the opt-in `expected_bars`
+    assertion."""
     if not track.events:
         return 0.0
     total = 0.0
     for event in track.events:
         if isinstance(event, ChordEvent):
             total += event.bars
-        elif isinstance(event, NoteEvent):
-            total += float(parse_fraction(event.duration, "duration"))
         else:
-            total += compile_raw_event(event).bars()
+            total += float(parse_fraction(event.duration, "duration"))
     return total
 
 

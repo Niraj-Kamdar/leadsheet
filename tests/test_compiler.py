@@ -9,10 +9,9 @@ from leadsheet.compiler import (
     compile_chord_event,
     compile_note_event,
     compile_piece,
-    compile_raw_event,
     track_bar_length,
 )
-from leadsheet.schema import ChordEvent, NoteEvent, PieceSchema, RawEvent, TrackSchema
+from leadsheet.schema import ChordEvent, NoteEvent, PieceSchema, TrackSchema
 
 
 def test_block_style():
@@ -92,11 +91,21 @@ def test_note_event_rest_has_no_notes():
     assert result.bars() == 0
 
 
-def test_raw_event_passthrough():
-    event = RawEvent(type="raw", notes="E5[.4;.4], r[.4], C5[.4;.4]")
-    result = compile_raw_event(event)
-    assert len(result.notes) == 2
-    assert result.notes[0].name == "E"
+def test_note_event_stack_is_simultaneous():
+    event = NoteEvent(type="note", notes=["C5", "E5", "G5"], duration="1/2")
+    result = compile_note_event(event)
+    assert [n.name for n in result.notes] == ["C", "E", "G"]
+    # internal interval=0 between the simultaneous pitches; only the last
+    # carries the external interval (here, defaulting to duration)
+    assert result.interval == [0, 0, 0.5]
+    assert result.bars() == 0.5
+
+
+def test_note_event_with_interval_differing_from_duration():
+    event = NoteEvent(type="note", note="E5", duration="1/2", interval="1/4")
+    result = compile_note_event(event)
+    assert result.interval == [0.25]
+    assert result.notes[0].duration == 0.5
 
 
 def test_compile_piece_lofi_progression_matches_spec_example():
@@ -201,13 +210,13 @@ def test_track_bar_length_sums_chord_and_note_events():
     assert track_bar_length(track) == pytest.approx(1.75)
 
 
-def test_track_bar_length_computes_real_raw_event_duration():
+def test_track_bar_length_sums_note_stack_duration():
     track = TrackSchema(
         role="melody",
         instrument="Flute",
-        events=[{"type": "raw", "notes": "C5[.4;.4], D5[.4;.4], E5[.4;.4]"}],
+        events=[{"type": "note", "notes": ["C5", "E5", "G5"], "duration": "1/4"}],
     )
-    assert track_bar_length(track) == pytest.approx(0.75)
+    assert track_bar_length(track) == pytest.approx(0.25)
 
 
 def test_track_bar_length_zero_for_drums():
@@ -226,7 +235,7 @@ def test_other_messages_never_shared_for_directly_constructed_chords():
     passing a kwarg .set() doesn't accept. It's harmless in practice
     because the compiler never mutates .other_messages in place anywhere;
     this test covers the styles the compiler *does* construct directly
-    (root_only/root_fifth/walking/note/rest/raw)."""
+    (root_only/root_fifth/walking/note/rest)."""
     a = compile_chord_event(ChordEvent(type="chord", chord="Am7", bars=1, style="root_only"))
     b = compile_chord_event(ChordEvent(type="chord", chord="Dm7", bars=1, style="root_only"))
     assert a.other_messages is not b.other_messages

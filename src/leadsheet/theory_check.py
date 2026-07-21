@@ -74,7 +74,7 @@ def check_chord_event(track_index: int, event_index: int, event: ChordEvent) -> 
 def compute_track_lengths(schema: PieceSchema) -> list[dict]:
     """Every non-drum track's real bar length (one pass, before `repeat`),
     via compiler.track_bar_length -- always computed, not opt-in, so a
-    drifted raw:/notes: track is visible in every validate()/compose()
+    drifted notes: track is visible in every validate()/compose()
     response instead of only failing silently at render time."""
     lengths = []
     for idx, track in enumerate(schema.tracks):

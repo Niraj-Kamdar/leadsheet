@@ -204,9 +204,8 @@ def test_expected_bars_must_be_positive():
 
 def test_expected_bars_defaults_to_none_and_is_not_checked_by_pydantic():
     # The actual expected_bars-vs-computed-length check lives in
-    # theory_check.py (it needs a RawEvent's real compiled duration, which
-    # this pure-Pydantic schema can't compute) -- PieceSchema itself just
-    # stores whatever value is given, mismatched or not.
+    # theory_check.py -- PieceSchema itself just stores whatever value is
+    # given, mismatched or not.
     piece = _piece(
         tracks=[
             {
@@ -231,5 +230,35 @@ def test_note_event_requires_note_unless_rest():
             }
         ]
     )
-    with pytest.raises(ValidationError, match="note is required unless rest=True"):
+    with pytest.raises(ValidationError, match="exactly one of rest, note, notes must be set"):
+        PieceSchema(**piece)
+
+
+def test_note_event_accepts_simultaneous_note_stack():
+    piece = _piece(
+        tracks=[
+            {
+                "role": "melody",
+                "instrument": "Flute",
+                "events": [{"type": "note", "notes": ["C5", "E5", "G5"], "duration": "1/2"}],
+            }
+        ]
+    )
+    schema = PieceSchema(**piece)
+    assert schema.tracks[0].events[0].notes == ["C5", "E5", "G5"]
+
+
+def test_note_event_rejects_simultaneous_note_and_notes():
+    piece = _piece(
+        tracks=[
+            {
+                "role": "melody",
+                "instrument": "Flute",
+                "events": [
+                    {"type": "note", "note": "C5", "notes": ["E5", "G5"], "duration": "1/2"}
+                ],
+            }
+        ]
+    )
+    with pytest.raises(ValidationError, match="exactly one of rest, note, notes must be set"):
         PieceSchema(**piece)

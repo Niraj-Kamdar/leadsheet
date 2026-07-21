@@ -255,6 +255,33 @@ def cmd_status(_args: argparse.Namespace) -> int:
     sf_cached = soundfont.is_cached()
     print(f"soundfont cached:   {'yes' if sf_cached else 'no'} ({soundfont.soundfont_path()})")
 
+    warnings: list[str] = []
+    if not fs_found:
+        warnings.append(
+            f"FluidSynth is missing; install it with: {fluidsynth_install_hint()}"
+        )
+    if not audio.ffmpeg_available():
+        warnings.append(
+            f"FFmpeg is missing; install it with: {ffmpeg_install_hint()} "
+            "for tagged MP3 output"
+        )
+    if not audio.tinysoundfont_available():
+        warnings.append(
+            "TinySoundFont fallback is unavailable; install it with: "
+            "pip install 'leadsheet[audio]'"
+        )
+    if fs_found and not sf_cached:
+        warnings.append(
+            "The soundfont is not cached; it will be downloaded on first FluidSynth render."
+        )
+
+    if warnings:
+        print("\nWarnings:")
+        for warning in warnings:
+            print(f"  warning: {warning}")
+    else:
+        print("\nWarnings: none")
+
     return 0
 
 

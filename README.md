@@ -25,6 +25,32 @@ pip install leadsheet
 leadsheet setup
 ```
 
+### Install through an LLM
+
+The easiest installation path is to paste this prompt into your coding
+assistant or terminal-enabled LLM:
+
+```text
+Install and set up the Python package `leadsheet` for me.
+
+1. Prefer `uv tool install leadsheet`; if uv is unavailable, use
+   `pip install leadsheet`.
+2. Run `leadsheet setup`.
+3. Install the recommended external audio dependencies, FluidSynth and
+   FFmpeg, using the package manager appropriate for this operating system.
+4. Run `leadsheet status` and inspect every line, including the Warnings
+   section.
+5. If status reports a missing dependency or integration, fix it when safe,
+   rerun setup if needed, and run status again.
+6. Report exactly what was installed, which client integrations were detected,
+   the selected audio backend, and any remaining warnings or commands I need
+   to run manually.
+
+Do not modify project files or global client configuration beyond what
+`leadsheet setup` is designed to configure. Ask before using a package manager
+or making changes outside the normal Leadsheet installation and setup flow.
+```
+
 `leadsheet setup` is a required, one-time follow-up step -- pip/wheel
 installs have no reliable post-install hook, so this is what actually:
 

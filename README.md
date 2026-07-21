@@ -241,13 +241,6 @@ leadsheet uninstall --purge-cache   # also delete the cached soundfont
 Everything is local and stateless: no database, no server-side file
 storage, no network calls except the one-time soundfont download.
 
-## Roadmap
-
-v1 (this) is entirely local. A planned v1.1 hosts the same MCP server on
-Cloudflare and records input/output pairs to disk or an S3-like store (no
-database) purely so they can be used as future fine-tuning data -- not
-built yet.
-
 ## Development
 
 ```bash

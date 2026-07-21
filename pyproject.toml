@@ -20,6 +20,9 @@ dependencies = [
 leadsheet = "leadsheet.cli:main"
 
 [project.optional-dependencies]
+audio = [
+    "tinysoundfont>=0.3.7,<0.4",
+]
 dev = [
     "pytest>=8",
     "pytest-asyncio>=0.24",

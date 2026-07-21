@@ -5,8 +5,8 @@ from leadsheet import audio
 from leadsheet.compiler import compile_piece
 from leadsheet.schema import PieceSchema
 
-requires_fluidsynth = pytest.mark.skipif(
-    not audio.audio_available(),
+requires_mp3 = pytest.mark.skipif(
+    not audio.mp3_available(),
     reason="fluidsynth/ffmpeg not installed in this environment",
 )
 
@@ -32,7 +32,7 @@ def test_audio_unavailable_when_binaries_missing(monkeypatch):
         audio.render_mp3(_sample_midi_bytes())
 
 
-@requires_fluidsynth
+@requires_mp3
 def test_render_mp3_produces_valid_non_empty_mp3():
     mp3_bytes = audio.render_mp3(_sample_midi_bytes())
     assert len(mp3_bytes) > 0

@@ -15,7 +15,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from leadsheet import soundfont
+from leadsheet import audio, soundfont
 
 SERVER_NAME = "leadsheet"
 
@@ -63,6 +63,24 @@ def fluidsynth_install_hint() -> str:
     if sys.platform.startswith("linux"):
         return "apt-get install fluidsynth  (or your distro's package manager)"
     return "install fluidsynth from https://www.fluidsynth.org/"
+
+
+def ffmpeg_install_hint() -> str:
+    if sys.platform == "darwin":
+        return "brew install ffmpeg"
+    if sys.platform.startswith("linux"):
+        return "apt-get install ffmpeg  (or your distro's package manager)"
+    return "install ffmpeg from https://ffmpeg.org/"
+
+
+def audio_backend_hint() -> str:
+    if fluidsynth_available() and audio.ffmpeg_available():
+        return "FluidSynth + FFmpeg (tagged MP3)"
+    if fluidsynth_available():
+        return "FluidSynth (playable WAV; install ffmpeg for MP3)"
+    if audio.tinysoundfont_available():
+        return "TinySoundFont (built-in WAV fallback)"
+    return "MIDI only (install FluidSynth or reinstall leadsheet)"
 
 
 def register_mcp_server() -> None:
@@ -182,7 +200,7 @@ def cmd_setup(_args: argparse.Namespace) -> int:
             return 1
         print(f"  {client} MCP configuration  ->  ok")
 
-    if fluidsynth_available():
+    if fluidsynth_available() or audio.tinysoundfont_available():
         print("Checking the cached soundfont ...")
         try:
             path = soundfont.ensure_soundfont()
@@ -191,9 +209,17 @@ def cmd_setup(_args: argparse.Namespace) -> int:
             print(f"  warning: could not download the soundfont: {exc}")
             print("  audio previews won't be available until this succeeds; MIDI output still works.")
     else:
-        print("fluidsynth not found -- audio previews will be skipped (MIDI output still works).")
-        print(f"  to enable audio previews, install it: {fluidsynth_install_hint()}")
-        print("  then re-run `leadsheet setup`.")
+        print("fluidsynth not found -- using the built-in WAV fallback when available.")
+        print(f"  to enable highest-quality tagged MP3 output, install it: {fluidsynth_install_hint()}")
+        if not audio.tinysoundfont_available():
+            print("  TinySoundFont is also unavailable; reinstall `leadsheet` to restore the fallback.")
+
+    if not audio.ffmpeg_available():
+        print(f"  optional MP3 encoder missing; install it with: {ffmpeg_install_hint()}")
+    if not audio.tinysoundfont_available():
+        print("  optional zero-system-dependency WAV fallback: pip install 'leadsheet[audio]'")
+
+    print(f"Audio backend: {audio_backend_hint()}")
 
     print()
     clients = [name for name, found in (("Claude Code", claude_found), ("Codex", codex_found), ("Gemini", gemini_found)) if found]
@@ -223,6 +249,8 @@ def cmd_status(_args: argparse.Namespace) -> int:
 
     fs_found = fluidsynth_available()
     print(f"fluidsynth:         {'found' if fs_found else 'NOT found'}")
+    print(f"ffmpeg:             {'found' if audio.ffmpeg_available() else 'NOT found'}")
+    print(f"audio backend:      {audio_backend_hint()}")
 
     sf_cached = soundfont.is_cached()
     print(f"soundfont cached:   {'yes' if sf_cached else 'no'} ({soundfont.soundfont_path()})")

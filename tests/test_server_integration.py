@@ -4,8 +4,8 @@ import pytest
 
 from leadsheet import audio, server
 
-requires_fluidsynth = pytest.mark.skipif(
-    not audio.audio_available(),
+requires_mp3 = pytest.mark.skipif(
+    not audio.mp3_available(),
     reason="fluidsynth/ffmpeg not installed in this environment",
 )
 
@@ -75,7 +75,7 @@ async def test_validate_missing_file(tmp_path):
     assert data["errors"]
 
 
-@requires_fluidsynth
+@requires_mp3
 @pytest.mark.asyncio
 async def test_compose_saves_tagged_mp3_next_to_source(tmp_path):
     path = _write(tmp_path, 'bpm=90 title="test piece"\nchords "Electric Piano 1" block: Am7 Dm7\n')
@@ -91,7 +91,7 @@ async def test_compose_saves_tagged_mp3_next_to_source(tmp_path):
     assert data["track_lengths"] == [{"track": 0, "name": None, "bars": 2.0}]
 
 
-@requires_fluidsynth
+@requires_mp3
 @pytest.mark.asyncio
 async def test_compose_compiles_sub_bar_chords_rests_and_macros(tmp_path):
     """End-to-end proof the three new grammar mechanisms actually compile
@@ -111,7 +111,7 @@ async def test_compose_compiles_sub_bar_chords_rests_and_macros(tmp_path):
     assert (tmp_path / "cinematic-snippet.mp3").exists()
 
 
-@requires_fluidsynth
+@requires_mp3
 @pytest.mark.asyncio
 async def test_compose_respects_output_dir_and_collision_suffix(tmp_path):
     path = _write(tmp_path, SAMPLE_B2)

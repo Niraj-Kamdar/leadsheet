@@ -1,6 +1,6 @@
 ---
 name: leadsheet
-description: Compose real, playable music (chord progressions, bass lines, melodies, drum patterns) and save it as a tagged mp3, via the local leadsheet MCP server. Use whenever the user asks to write a song, chord progression, backing track, melody, drum beat, jingle, or otherwise generate/compose music in any genre or mood.
+description: Compose real, playable music (chord progressions, bass lines, melodies, drum patterns) and save it as the best available audio output, via the local leadsheet MCP server. Use whenever the user asks to write a song, chord progression, backing track, melody, drum beat, jingle, or otherwise generate/compose music in any genre or mood.
 ---
 
 # leadsheet: composing music with the leadsheet MCP server
@@ -12,7 +12,7 @@ instruments, what structure -- and write it as a compact line-oriented DSL
 (**B2**, defined below) in a `.leadsheet` file. The `leadsheet` MCP server
 reads that file, validates it, deterministically compiles it into real
 musicpy objects, cross-checks the result against musicpy's own chord-theory
-detector, renders a tagged mp3 preview, and saves it to disk.
+detector, renders the best available playable preview, and saves it to disk.
 
 **Never write musicpy Python code.** Everything you need to express --
 chords, arpeggios, walking bass, drum patterns, melodies -- has a place in
@@ -44,11 +44,11 @@ the B2 grammar below.
    saved. If it returns warnings (e.g. a chord-detection mismatch), read
    them: they usually mean real voicing/enharmonic ambiguity, but reconsider
    the flagged chord before presenting the result to the user.
-5. On success, `compose` has already rendered, tagged, and saved an mp3 --
-   its path is in the result (`{"ok": true, "path": "...", "warnings": []}`),
-   next to the `.leadsheet` file by default, or under `output_dir` if you
-   passed one. There's no separate save step and nothing to run by hand --
-   just tell the user where the file landed.
+5. On success, `compose` has already rendered and saved playable audio --
+   preferably tagged mp3, otherwise wav, or MIDI if no renderer is available.
+   Its path, `audio_format`, `audio_backend`, and any install hints are in the
+   result. There's no separate save step and nothing to run by hand -- just
+   tell the user where the file landed and surface relevant warnings.
 6. For a follow-up edit ("make it slower", "change the second chord", "swap
    the bass instrument"), edit the same `.leadsheet` file with your Edit
    tool -- a precise, targeted change -- and call `compose(path=...)` again.

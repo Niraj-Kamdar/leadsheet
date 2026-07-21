@@ -4,7 +4,7 @@ Compose simple, playable music with ChatGPT, Claude, Codex, or Gemini — withou
 DAW, a subscription to a music-generation service, or specialist music software.
 `leadsheet` installs a local MCP server and client Skill that turn a natural language 
 prompt into a compact, editable `.leadsheet` file, then validate and render
-it as a tagged MP3.
+it as the best available playable audio.
 
 Version 0.2.0 introduces the `.leadsheet` format. It is a plain-text, line-oriented
 music DSL designed for both AI generation and human editing: it is diffable,
@@ -33,8 +33,8 @@ installs have no reliable post-install hook, so this is what actually:
   Gemini (`~/.gemini/settings.json`)
 - installs the Skill for each detected client: `~/.claude/skills/leadsheet/`
   for Claude Code and `~/.agents/skills/leadsheet/` for Codex
-- checks for `fluidsynth` (needed for the audio preview -- MIDI output
-  works either way) and prints an install hint if it's missing
+- checks the available audio backend and prints install hints for optional
+  FluidSynth/FFmpeg upgrades
 - downloads and caches a General MIDI soundfont for rendering
 
 `uv tool install` is preferred because it keeps `leadsheet` in a stable,
@@ -133,23 +133,37 @@ The MCP tools are:
 - `list_capabilities` — available chord types, GM instruments, drum kits, styles,
   and guardrails.
 - `validate` — parses and theory-checks a `.leadsheet` file without rendering.
-- `compose` — validates, compiles, renders, and saves the tagged MP3.
+- `compose` — validates, compiles, renders, and saves the best available audio.
 
 After a change, edit the same `.leadsheet` file and compose it again. The text
 file is the source of truth.
 
-### Audio previews (optional but recommended)
+### Audio output
 
-Audio rendering needs the `fluidsynth` binary on `PATH`:
+`compose` selects the best available output automatically:
+
+- FluidSynth + FFmpeg: tagged MP3
+- FluidSynth alone: playable WAV
+- optional TinySoundFont fallback: playable WAV with no system audio binaries
+- no renderer: MIDI output plus an install warning
+
+FluidSynth and FFmpeg are optional but recommended for the highest-fidelity
+tagged MP3 output:
 
 ```bash
 brew install fluidsynth       # macOS
 apt-get install fluidsynth    # Debian/Ubuntu
 ```
 
-Without it, `leadsheet` still returns a fully valid MIDI file for every
-composition -- you just won't get an inline audio preview until
-fluidsynth is installed and `leadsheet setup` is re-run.
+If either binary is missing, audio does not fail: the server falls back to WAV
+and includes a warning telling the calling LLM exactly what can be installed
+to upgrade the result.
+
+To enable the in-process fallback explicitly, install the optional audio extra:
+
+```bash
+pip install 'leadsheet[audio]'
+```
 
 ## Other commands
 
@@ -170,7 +184,7 @@ leadsheet uninstall --purge-cache   # also delete the cached soundfont
   - `list_capabilities` -- valid chord types, GM instruments, drum
     kits/tokens, event styles, and guardrail limits.
   - `validate` -- structural and music-theory validation, without compiling.
-  - `compose` -- validates, compiles, renders, and returns an mp3 preview.
+  - `compose` -- validates, compiles, renders, and returns a playable preview.
 
 Everything is local and stateless: no database, no server-side file
 storage, no network calls except the one-time soundfont download.
@@ -189,8 +203,8 @@ uv sync
 uv run pytest
 ```
 
-Audio-pipeline tests that need `fluidsynth` are skipped automatically if
-it isn't installed in the dev environment.
+Audio-pipeline tests that need FluidSynth and FFmpeg are skipped automatically
+if they aren't installed in the dev environment.
 
 ## License
 

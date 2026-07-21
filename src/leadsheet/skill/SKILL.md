@@ -302,11 +302,17 @@ are separate `drums` lines with their own `start=`. See
   unless the user asked for something simple/folky.
 - For genre-specific instrument picks, `style`/`pattern=` tricks (e.g. metal's
   palm-muted power-chord chug, chiptune's fast arpeggios, reggaeton's dembow
-  drum pattern), and validated worked examples covering rock, metal,
-  chiptune/8-bit/16-bit/retro, acoustic guitar, pop, lo-fi, reggaeton, and
-  EDM, see `references/genre-recipes.md` in this skill -- read the relevant
-  section before composing in one of those genres rather than guessing at
-  instrument names or drum patterns from memory.
+  drum pattern), and validated worked examples covering rock, metal (incl.
+  doom), chiptune/8-bit/16-bit/retro, acoustic guitar, pop, lo-fi, reggaeton,
+  EDM, cinematic/orchestral (incl. horror/suspense and harp arpeggios),
+  ambient, and jazz-pop, see `references/genre-recipes.md` in this skill --
+  read the relevant section before composing in one of those genres rather
+  than guessing at instrument names or drum patterns from memory. The
+  package's `examples/` directory (a sibling of `src/`/`tests/`) holds the
+  full `.leadsheet` file behind every one of those, plus a few pieces that
+  showcase a grammar mechanic rather than a genre (multi-section verse/
+  chorus, `define`+`section` combined, an extreme-tempo loop) -- Read one
+  directly for a complete, larger example to adapt from.
 
 ## Worked example: lo-fi progression (validated end-to-end -- compiles,
 renders, and passes the chord-theory cross-check with zero warnings)

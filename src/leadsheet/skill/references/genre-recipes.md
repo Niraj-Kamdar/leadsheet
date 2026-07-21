@@ -13,6 +13,19 @@ Instrument names/numbers and drum-kit names are quoted verbatim from
 `list_capabilities` -- use the string form (e.g. `"Distortion Guitar"`), the
 numbers here are just so you recognize them in `list_capabilities` output.
 
+Beyond the snippets below, the `examples/` directory alongside this repo's
+`src/` and `tests/` holds a further corpus of full, validated `.leadsheet`
+files -- one per genre/technique, each parsed, schema-checked, theory-checked,
+and compiled end-to-end as part of the test suite (`tests/test_examples_corpus.py`).
+They're adapted from (not verbatim transcriptions of) the reference
+compositions in musicpy's own docs -- reach for one directly, with your Read
+tool, when a genre or technique below is too thin, or isn't covered at all
+(doom metal, horror/suspense orchestral, non-linear harp arpeggios, ambient
+pads, lydian-borrowed jazz-pop, a verse/chorus multi-section arrangement, an
+extreme-tempo four-on-the-floor loop, and a `section`+`define`/`use`-driven
+piece are all covered there -- see the per-genre notes below for which file
+goes with which).
+
 ## Quick lookup
 
 | genre | bpm | drum kit | signature move |
@@ -26,6 +39,15 @@ numbers here are just so you recognize them in `list_capabilities` output.
 | Reggaeton | 88-96 | `TR-808 Kit` | dembow drum pattern, minor-loop chords |
 | EDM | 122-130 | `Electronic Kit` | four-on-the-floor kick, sawtooth lead arpeggio |
 | Cinematic / orchestral | 60-100 (varies a lot by cue) | sparse, or none | sub-bar chords (`*<bars>`), chord/brass rests (`r`), motif reuse via `define`/`use` |
+| Ambient / new-age | 70-90 | none | sustained `maj9`/`m9` pads, low velocity, sparse melody |
+| Jazz-pop (borrowed/lydian color) | 90-110 | none, or light brush | slash chords (`Cmaj7/E`), `walking` bass, stepwise melody |
+| Hardcore / speedcore / gabber | 250-300+ | `TR-808 Kit` or `Electronic Kit` | four-on-the-floor at an extreme bpm, keep bars short |
+
+See `examples/doom-metal-dirge.leadsheet` for doom metal's ultra-slow end
+(bpm 25-70, under the Metal row above) and `examples/horror-suspense-orchestral.leadsheet`
+/ `examples/orchestral-harp-cascade.leadsheet` for two more cinematic/orchestral
+techniques (eerie tension, non-linear harp arpeggios), all discussed under
+their respective sections below.
 
 ## Structuring longer, multi-section pieces
 
@@ -116,6 +138,11 @@ subdivision count, e.g. 8 slots for straight 8ths over 1 bar:
   (repeat a single segment line's chord fewer times, or just fewer chords
   overall), minimal drums (see the musicpy doc's "doom metal, 25BPM"
   example, which used a slow 4-chord loop with sparse kick/snare).
+  `examples/doom-metal-dirge.leadsheet` is a full validated take on this: bpm
+  32, four ringing power chords (`E5*2 D5*2 C5*2 B5*2`) an octave apart on
+  guitar/bass, and a sparse `K, 0, 0, 0, S, 0, 0, 0` kick/snare pattern. Every
+  chord there produces the expected power-chord `detected: null` warning
+  described above -- that's correct, not a bug to fix.
 - Instrument: `"Distortion Guitar"` for the riff, `"Electric Bass (pick)"`
   for bass (often doubling the guitar's root an octave down).
 - Drums: `"Power Kit"` (or `"Standard"`), busier than rock -- add extra kick
@@ -302,3 +329,97 @@ static pedal under shifting upper-structure chords, both read as
 "cinematic" more readily than a plain I-IV-V. See SKILL.md's own "cinematic
 cue" worked example for all of the above combined in one short, validated
 piece (compiles, renders, zero warnings).
+
+Two more validated pieces cover ground SKILL.md's cinematic-cue example
+doesn't:
+
+- `examples/horror-suspense-orchestral.leadsheet` -- eerie/suspenseful
+  tension from half-diminished and diminished-seventh harmony
+  (`Bm7b5 G7 Cdim7 F#7`) on tremolo strings, a sparse punctuating `Timpani`
+  hit on each chord's root (mostly rests via `r*<bars>`, one short stab), and
+  a lone `English Horn` line for the "lament" -- the source docs' own "scary
+  atmosphere"/"horror ambient" examples' mood, built from this grammar's
+  ordinary tools rather than reproduced note-for-note.
+- `examples/orchestral-harp-cascade.leadsheet` -- the source docs lean
+  heavily on a `%(6451, ...)` chord-tone arpeggiation shorthand (musicpy's
+  own digit-sequence syntax) for a distinctive non-linear harp cascade; this
+  grammar's nearest equivalent is `custom_pattern` with an explicit
+  `pattern=` index list, e.g. `pattern=[1,3,2,4,3,1,4,2]` on `"Orchestral
+  Harp"` -- picks chord tones out of strict order instead of a plain
+  ascending/descending arpeggio, which is the actual musical effect being
+  reached for.
+
+## Ambient / new-age
+
+Sparse and sustained -- the opposite instinct from the driving genres above.
+Extended `maj9`/`m9` chords held with `block` at a low `vel=` (50-60), a
+`root_only` bass an octave or two below, and a melody that's mostly rests
+(a phrase every bar or two, not a continuous line).
+
+- Chords: a pad instrument (`"Pad 1 (new age)"`, `"Pad 2 (warm)"`, or
+  `"String Ensemble 2"`), `block`, no `subdiv=` needed (a single held stab).
+- Bass: `"Contrabass"` or `"Acoustic Bass"`, `root_only`, low `vel=`.
+- Melody: something breathy (`"Flute"`, `"Pan Flute"`, `"Oboe"`), long `dur=`
+  values with plenty of `r` tokens between phrases.
+- No drums, or something extremely minimal -- this genre reads as "ambient"
+  through space and restraint, not rhythm.
+
+```
+bpm=78
+chords "Pad 1 (new age)" name="pad" block oct=4 vel=55: CM9 Fmaj9 Am9 Gsus
+bass "Contrabass" name="bass" root_only oct=1 vel=45: CM9 Fmaj9 Am9 Gsus
+melody "Flute" name="air" notes dur=1 vel=60: E5 r C5 r
+```
+
+See `examples/ambient-pad-reverie.leadsheet` for the full validated version
+of the above.
+
+## Jazz-pop (borrowed/lydian color)
+
+Sits between Pop and Lo-fi: still a clear, singable progression, but colored
+with a chord borrowed from outside the plain diatonic set (often the lydian
+`#11`-flavored `II7` in a major key) and a slash chord for smoother bass
+motion, e.g. `I - II7 - IV - I/3` (`Cmaj7 - D7 - Fmaj7 - Cmaj7/E`).
+
+- Chords: `"Electric Piano 1"`, `block` at `subdiv=1/4` for a gentle comp
+  feel.
+- Bass: `"Acoustic Bass"`, `walking` -- slash chords like `Cmaj7/E` still
+  resolve to a sensible walking line (the bass line follows the chord's
+  root, not the slash note).
+- Melody: a mallet/keys color (`"Vibraphone"`) works well over jazz
+  harmony -- a stepwise `notes:` line outlining the chord tones.
+
+```
+bpm=100
+chords "Electric Piano 1" name="chords" block subdiv=1/4 oct=3 vel=90: Cmaj7 D7 Fmaj7 Cmaj7/E
+bass "Acoustic Bass" name="bass" walking oct=2 vel=85: Cmaj7 D7 Fmaj7 Cmaj7/E
+melody "Vibraphone" name="melody" notes dur=1/4 vel=95: G5 F5 E5 F5 E5 D5 E5 D5 C5 B4 G4@1/2
+```
+
+See `examples/lydian-jazz-pop.leadsheet` for the full validated version of
+the above.
+
+## Structural techniques and extreme tempo
+
+Three more validated pieces in `examples/` exist to show a technique rather
+than define a genre:
+
+- `examples/arena-rock-anthem.leadsheet` -- a full verse/chorus arrangement
+  in one file: a multi-segment `chords` track (verse `block` at a lower
+  register, chorus `block` louder and an octave up), a syncopated bass line
+  using `*<bars>` fractions (`Cm*1.5 Bb*0.5 Ab*1 ...`) for the verse and a
+  plain `root_fifth` line for the chorus, a lead hook entering only at
+  `start=4`, and separate verse/chorus `drums` tracks -- the "Structuring
+  longer, multi-section pieces" techniques above, all in one 80s-arena-rock
+  package.
+- `examples/boss-battle-anthem.leadsheet` -- a `define`/`use` motif combined
+  with `section`/`use section`, re-triggered twice at different `start=`
+  values (an intro pattern reused as a "phase 2" later in the piece) with a
+  melodic hook layered in between -- a compact demonstration of both reuse
+  mechanisms working together, distinct from SKILL.md's own `define`/`use`
+  and `section` examples (which each show one mechanism in isolation).
+- `examples/speedcore-gabber.leadsheet` -- an extreme-tempo (bpm 300)
+  four-on-the-floor loop (`K, H, K, H, K, H, K, H` on `"TR-808 Kit"`), kept
+  to 2 bars -- the reminder that very high bpm means keeping a track's bar
+  count low to stay under the server's `max_duration_seconds` guardrail
+  (`list_capabilities` reports the current limit).

@@ -11,21 +11,7 @@ music DSL designed for both AI generation and human editing: it is diffable,
 version-controllable, and substantially cheaper to send through an LLM than verbose
 JSON or code-based music notation.
 
-## Install
-
-```bash
-uv tool install leadsheet   # recommended
-leadsheet setup
-```
-
-or, without `uv`:
-
-```bash
-pip install leadsheet
-leadsheet setup
-```
-
-### Install through an LLM
+### Quick Install through an LLM
 
 The easiest installation path is to paste this prompt into your coding
 assistant or terminal-enabled LLM:
@@ -49,6 +35,56 @@ Install and set up the Python package `leadsheet` for me.
 Do not modify project files or global client configuration beyond what
 `leadsheet setup` is designed to configure. Ask before using a package manager
 or making changes outside the normal Leadsheet installation and setup flow.
+```
+
+### Usage Examples
+
+After installation, paste these prompts into your LLM to create music:
+
+**Simple melody:**
+```text
+Create a 16-bar leadsheet file for a simple folk melody in C major at 120 bpm.
+Use a Piano for chords and Flute for melody. The chords should be: C, F, C, G.
+Write a simple, memorable 8-note melody that fits these chords.
+```
+
+**Jazz composition:**
+```text
+Write a 12-bar jazz blues leadsheet in F major at 100 bpm. Use:
+- Electric Piano for block chords (F7, Bb7, C7)
+- Acoustic Bass for root-fifth pattern
+- Drums with a shuffle feel
+- Tenor Saxophone melody
+
+Make the melody swing and use some chromaticism.
+```
+
+**Upbeat electronic track:**
+```text
+Create an 8-bar dance track at 128 bpm in A minor. Use:
+- Synth Strings for block chords: Am7, Dm7, Am7, Dm7
+- Synth Bass with root-fifth pattern
+- Standard drums with repeat=8 for a 4-on-the-floor feel
+- Synth Lead for the melody
+
+Keep the energy high and make it catchy.
+```
+
+After your LLM generates the `.leadsheet` file, ask it to `validate` the file,
+then `compose` it to hear the audio playback.
+
+## Manual Installation
+
+```bash
+uv tool install leadsheet   # recommended
+leadsheet setup
+```
+
+or, without `uv`:
+
+```bash
+pip install leadsheet
+leadsheet setup
 ```
 
 `leadsheet setup` is a required, one-time follow-up step -- pip/wheel

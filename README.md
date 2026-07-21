@@ -39,39 +39,29 @@ or making changes outside the normal Leadsheet installation and setup flow.
 
 ### Usage Examples
 
-After installation, paste these prompts into your LLM to create music:
+After installation, try asking your LLM to compose something simple:
 
-**Simple melody:**
 ```text
-Create a 16-bar leadsheet file for a simple folk melody in C major at 120 bpm.
-Use a Piano for chords and Flute for melody. The chords should be: C, F, C, G.
-Write a simple, memorable 8-note melody that fits these chords.
+Create a short, happy piano song for me. Make it about 30 seconds long, 
+upbeat and cheerful. Use piano and maybe some strings.
 ```
 
-**Jazz composition:**
-```text
-Write a 12-bar jazz blues leadsheet in F major at 100 bpm. Use:
-- Electric Piano for block chords (F7, Bb7, C7)
-- Acoustic Bass for root-fifth pattern
-- Drums with a shuffle feel
-- Tenor Saxophone melody
+Or for something relaxing:
 
-Make the melody swing and use some chromaticism.
+```text
+Write me a calm, peaceful piece with a slow tempo. Use soft instruments 
+like strings and piano. Make it about a minute long.
 ```
 
-**Upbeat electronic track:**
-```text
-Create an 8-bar dance track at 128 bpm in A minor. Use:
-- Synth Strings for block chords: Am7, Dm7, Am7, Dm7
-- Synth Bass with root-fifth pattern
-- Standard drums with repeat=8 for a 4-on-the-floor feel
-- Synth Lead for the melody
+Or try something with a beat:
 
-Keep the energy high and make it catchy.
+```text
+I'd like an upbeat song with drums and bass. Something you'd hear in a 
+cafe or lounge. Keep it simple and melodic.
 ```
 
-After your LLM generates the `.leadsheet` file, ask it to `validate` the file,
-then `compose` it to hear the audio playback.
+After your LLM creates the `.leadsheet` file, just ask it to make the song 
+playable and you'll hear the audio.
 
 ## Manual Installation
 

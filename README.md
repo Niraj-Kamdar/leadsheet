@@ -1,9 +1,9 @@
 # leadsheet
 
-Compose real music with Claude, without either of you writing a line of
+Compose real music with Claude, Codex, or Gemini, without either of you writing a line of
 musicpy. `leadsheet` installs a local MCP server (built on
-[musicpy](https://github.com/Rainbow-Dreamer/musicpy)) and a Claude Skill
-that together let Claude turn a chord-symbol-based description of a piece
+[musicpy](https://github.com/Rainbow-Dreamer/musicpy)) and a client Skill
+that together let an AI client turn a chord-symbol-based description of a piece
 ("Am7-Dm7-G7-Cmaj7 progression, lo-fi piano, 85 BPM") into a real MIDI file
 and an audio preview, with a musicology cross-check on every chord.
 
@@ -24,9 +24,11 @@ leadsheet setup
 `leadsheet setup` is a required, one-time follow-up step -- pip/wheel
 installs have no reliable post-install hook, so this is what actually:
 
-- registers the MCP server with Claude Code globally (`claude mcp add
-  leadsheet -s user`)
-- installs the Skill into `~/.claude/skills/leadsheet/`
+- registers the MCP server with every detected client: Claude Code globally
+  (`claude mcp add leadsheet -s user`), Codex (`~/.codex/config.toml`), and
+  Gemini (`~/.gemini/settings.json`)
+- installs the Skill for each detected client: `~/.claude/skills/leadsheet/`
+  for Claude Code and `~/.agents/skills/leadsheet/` for Codex
 - checks for `fluidsynth` (needed for the audio preview -- MIDI output
   works either way) and prints an install hint if it's missing
 - downloads and caches a General MIDI soundfont for rendering
@@ -41,7 +43,7 @@ Re-run `leadsheet setup` any time after upgrading (`pip install -U
 leadsheet` / `uv tool upgrade leadsheet`) to refresh the registered server
 and the installed skill.
 
-After setup, restart Claude Code and ask it to compose something.
+After setup, restart your configured client and ask it to compose something.
 
 ### Audio previews (optional but recommended)
 
@@ -66,7 +68,8 @@ leadsheet uninstall --purge-cache   # also delete the cached soundfont
 
 ## How it works
 
-- **Skill** (`~/.claude/skills/leadsheet/SKILL.md`): teaches Claude a
+- **Skill** (`~/.claude/skills/leadsheet/SKILL.md` or
+  `~/.agents/skills/leadsheet/SKILL.md`): teaches the client a
   small, explicit JSON schema built around chord symbols (`"Am7"`,
   `"G7sus4"`) -- not musicpy's `@`/`%`/`^` operator syntax, and not
   musicpy's own verbose internal JSON.

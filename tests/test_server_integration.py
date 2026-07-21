@@ -99,7 +99,7 @@ async def test_compose_compiles_sub_bar_chords_rests_and_macros(tmp_path):
     motif defined once and used on two different tracks."""
     text = (
         'bpm=100 title="cinematic snippet"\n'
-        'define villain_motif raw: C4[1;1], Eb4[1;1], G4[1;1]\n'
+        'define villain_motif notes dur=1: C4 Eb4 G4\n'
         'chords "Distortion Guitar" block: Am7*0.5 r*0.5 Dm7\n'
         'melody "Trumpet" name="brass" use: villain_motif\n'
         'melody "Violin" name="strings" use: villain_motif x2\n'

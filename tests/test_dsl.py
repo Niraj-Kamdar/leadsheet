@@ -97,11 +97,6 @@ def test_drum_line_rest_token():
     assert result["tracks"][0]["drum_pattern"] == "K, 0, K, S2"
 
 
-def test_melody_raw_line():
-    result = dsl.parse_dsl('bpm=100\nmelody "Flute" name="lead" raw: E5[.4;.4], r[.4], C5[.4;.4]\n')
-    assert result["tracks"][0]["events"] == [{"type": "raw", "notes": "E5[.4;.4], r[.4], C5[.4;.4]"}]
-
-
 def test_melody_notes_line():
     result = dsl.parse_dsl('bpm=100\nmelody "Violin" notes: E5@1/4 r@1/8 G5@1/4\n')
     assert result["tracks"][0]["events"] == [
@@ -111,8 +106,79 @@ def test_melody_notes_line():
     ]
 
 
+def test_melody_notes_segment_default_duration():
+    result = dsl.parse_dsl('bpm=100\nmelody "Flute" notes dur=1/4: E5 r C5\n')
+    assert result["tracks"][0]["events"] == [
+        {"type": "note", "note": "E5", "duration": "1/4"},
+        {"type": "note", "rest": True, "duration": "1/4"},
+        {"type": "note", "note": "C5", "duration": "1/4"},
+    ]
+
+
+def test_melody_notes_per_token_override_wins_over_segment_default():
+    result = dsl.parse_dsl('bpm=100\nmelody "Flute" notes dur=1/4: E5 C5@1/2\n')
+    events = result["tracks"][0]["events"]
+    assert events[0]["duration"] == "1/4"
+    assert events[1]["duration"] == "1/2"
+    assert "interval" not in events[1]
+
+
+def test_melody_notes_int_segment_default_applies_only_without_override():
+    result = dsl.parse_dsl('bpm=100\nmelody "Flute" notes dur=1/4 int=1/8: E5 C5@1/2\n')
+    events = result["tracks"][0]["events"]
+    assert events[0] == {"type": "note", "note": "E5", "duration": "1/4", "interval": "1/8"}
+    # the token's own @ override sets duration==interval, superseding int=
+    assert events[1] == {"type": "note", "note": "C5", "duration": "1/2"}
+
+
+def test_melody_notes_vel_segment_default():
+    result = dsl.parse_dsl('bpm=100\nmelody "Flute" notes dur=1/4 vel=70: E5 G5\n')
+    events = result["tracks"][0]["events"]
+    assert all(e["velocity"] == 70 for e in events)
+
+
+def test_melody_notes_simultaneous_stack():
+    result = dsl.parse_dsl('bpm=100\nmelody "Piano" notes dur=1/2: C5+E5+G5\n')
+    assert result["tracks"][0]["events"] == [
+        {"type": "note", "notes": ["C5", "E5", "G5"], "duration": "1/2"}
+    ]
+
+
+def test_melody_notes_stack_with_override():
+    result = dsl.parse_dsl('bpm=100\nmelody "Piano" notes: C5+E5+G5@1/2\n')
+    assert result["tracks"][0]["events"] == [
+        {"type": "note", "notes": ["C5", "E5", "G5"], "duration": "1/2"}
+    ]
+
+
+def test_melody_notes_repeat_count_on_preceding_token():
+    result = dsl.parse_dsl('bpm=100\nmelody "Flute" notes dur=1/8: E5 x3 G5\n')
+    events = result["tracks"][0]["events"]
+    assert [e["note"] for e in events] == ["E5", "E5", "E5", "G5"]
+    assert events[0] is not events[1]  # independent dict copies
+
+
+def test_melody_notes_repeat_count_works_on_a_stack():
+    result = dsl.parse_dsl('bpm=100\nmelody "Piano" notes dur=1/4: C5+E5 x2\n')
+    events = result["tracks"][0]["events"]
+    assert [e["notes"] for e in events] == [["C5", "E5"], ["C5", "E5"]]
+
+
+def test_melody_notes_can_be_a_segment_line():
+    text = (
+        'bpm=100\n'
+        'melody "Flute":\n'
+        '  block: C\n'
+        '  notes dur=1/4: E5 G5\n'
+    )
+    events = dsl.parse_dsl(text)["tracks"][0]["events"]
+    assert events[0]["type"] == "chord"
+    assert events[1] == {"type": "note", "note": "E5", "duration": "1/4"}
+    assert events[2] == {"type": "note", "note": "G5", "duration": "1/4"}
+
+
 def test_melody_track_can_use_chord_list_segment():
-    # Not all melody tracks use raw:/notes: -- genre-recipes.md's Chiptune and
+    # Not all melody tracks use notes: -- genre-recipes.md's Chiptune and
     # EDM examples give melody-role tracks an ordinary chord-list segment
     # (arpeggiated) instead. See dsl.py's module docstring.
     result = dsl.parse_dsl('bpm=150\nmelody "Lead 1 (square)" arpeggio_up subdiv=1/16 oct=5: C Am\n')
@@ -241,19 +307,60 @@ def test_macro_use_produces_independent_dict_copies():
     assert events[1]["chord"] == "C"
 
 
-def test_macro_raw_kind():
+def test_macro_notes_kind_reused_on_two_tracks():
     text = (
         'bpm=100\n'
-        'define motif raw: C4[1;1], Eb4[1;1], G4[1;1]\n'
+        'define motif notes dur=1: C4 Eb4 G4\n'
         'melody "Trumpet" name="brass" start=16 use: motif\n'
         'melody "Violin" name="strings" start=32 use: motif x2\n'
     )
     tracks = dsl.parse_dsl(text)["tracks"]
-    assert tracks[0]["events"] == [{"type": "raw", "notes": "C4[1;1], Eb4[1;1], G4[1;1]"}]
-    assert tracks[1]["events"] == [
-        {"type": "raw", "notes": "C4[1;1], Eb4[1;1], G4[1;1]"},
-        {"type": "raw", "notes": "C4[1;1], Eb4[1;1], G4[1;1]"},
-    ]
+    assert [e["note"] for e in tracks[0]["events"]] == ["C4", "Eb4", "G4"]
+    assert [e["note"] for e in tracks[1]["events"]] == ["C4", "Eb4", "G4", "C4", "Eb4", "G4"]
+
+
+def test_use_transpose_shifts_note_pitches():
+    text = 'bpm=100\ndefine motif notes dur=1/4: E5 G5\nmelody "Violin" use: motif transpose=-3\n'
+    events = dsl.parse_dsl(text)["tracks"][0]["events"]
+    assert [e["note"] for e in events] == ["C#5", "E5"]
+
+
+def test_use_transpose_crosses_octave_boundary():
+    text = 'bpm=100\ndefine motif notes dur=1/4: B4\nmelody "Violin" use: motif transpose=2\n'
+    events = dsl.parse_dsl(text)["tracks"][0]["events"]
+    assert events[0]["note"] == "C#5"
+
+
+def test_use_transpose_shifts_chord_root_and_octave():
+    text = 'bpm=100\ndefine riff: B\nchords "Piano" use: riff transpose=2\n'
+    events = dsl.parse_dsl(text)["tracks"][0]["events"]
+    assert events[0]["chord"] == "C#"
+    assert events[0]["octave"] == 4  # default octave 3, crosses up by 1
+
+
+def test_use_transpose_shifts_note_stack():
+    text = 'bpm=100\ndefine motif notes dur=1/2: C5+E5+G5\nmelody "Piano" use: motif transpose=2\n'
+    events = dsl.parse_dsl(text)["tracks"][0]["events"]
+    assert events[0]["notes"] == ["D5", "F#5", "A5"]
+
+
+def test_use_vel_overrides_macro_velocity():
+    text = 'bpm=100\ndefine motif notes dur=1/4: E5 G5\nmelody "Violin" use: motif vel=70\n'
+    events = dsl.parse_dsl(text)["tracks"][0]["events"]
+    assert all(e["velocity"] == 70 for e in events)
+
+
+def test_use_transpose_and_vel_combine_with_repeat():
+    text = 'bpm=100\ndefine motif notes dur=1/4: E5\nmelody "Violin" use: motif x2 transpose=1 vel=90\n'
+    events = dsl.parse_dsl(text)["tracks"][0]["events"]
+    assert [e["note"] for e in events] == ["F5", "F5"]
+    assert all(e["velocity"] == 90 for e in events)
+
+
+def test_error_use_transpose_on_drum_macro_rejected():
+    text = 'bpm=100\ndefine groove: K, H\ndrums "Power Kit" use: groove transpose=2\n'
+    with pytest.raises(dsl.DslSyntaxError, match=r"line 3.*transpose=/vel=.*aren't valid on a drum"):
+        dsl.parse_dsl(text)
 
 
 def test_macro_notes_kind():
@@ -317,13 +424,106 @@ def test_error_use_repeat_count_malformed():
 
 
 def test_error_misplaced_colon_after_macro_name_gives_actionable_message():
-    """The easy-to-make mistake: `define name: raw: ...` puts the ':' right
-    after the name, which becomes the terminator before 'raw:' is ever
-    seen -- must not be silently misclassified as a drum-kind macro just
-    because the leftover text contains commas."""
-    text = 'bpm=100\ndefine motif: raw: C4[1;1], D4[1;1]\n'
-    with pytest.raises(dsl.DslSyntaxError, match=r"line 2.*'raw:'.*already ended the header"):
+    """The easy-to-make mistake: `define name: notes: ...` puts the ':'
+    right after the name, which becomes the terminator before 'notes:' is
+    ever seen -- must not be silently misclassified as a drum-kind macro
+    just because the leftover text contains commas."""
+    text = 'bpm=100\ndefine motif: notes: C4@1/4, D4@1/4\n'
+    with pytest.raises(dsl.DslSyntaxError, match=r"line 2.*'notes:'.*already ended the header"):
         dsl.parse_dsl(text)
+
+
+# ---------------------------------------------------------------------------
+# section / use section
+# ---------------------------------------------------------------------------
+
+CHORUS_SECTION = (
+    'bpm=100\n'
+    'section chorus:\n'
+    '  chords "Electric Piano 1" block: F C\n'
+    '  bass "Acoustic Bass" root_fifth oct=2: F C\n'
+    '  drums "Standard" repeat=2: K, H, S, H\n'
+    '  melody "Flute" notes dur=1/4: F5 A5\n'
+    'use section chorus start=8\n'
+)
+
+
+def test_use_section_appends_every_fragment_offset_by_start():
+    tracks = dsl.parse_dsl(CHORUS_SECTION)["tracks"]
+    assert len(tracks) == 4
+    assert [t["role"] for t in tracks] == ["chords", "bass", "drums", "melody"]
+    assert all(t["start_bar"] == 8 for t in tracks)
+    assert tracks[0]["events"][0]["chord"] == "F"
+
+
+def test_use_section_can_be_invoked_more_than_once():
+    text = CHORUS_SECTION + 'use section chorus start=24\n'
+    tracks = dsl.parse_dsl(text)["tracks"]
+    assert len(tracks) == 8
+    assert [t["start_bar"] for t in tracks] == [8, 8, 8, 8, 24, 24, 24, 24]
+
+
+def test_use_section_offset_adds_to_fragments_own_start():
+    text = (
+        'bpm=100\n'
+        'section intro:\n'
+        '  chords "Piano" start=1 block: C\n'
+        'use section intro start=8\n'
+    )
+    tracks = dsl.parse_dsl(text)["tracks"]
+    assert tracks[0]["start_bar"] == 9
+
+
+def test_use_section_produces_independent_copies():
+    text = CHORUS_SECTION + 'use section chorus start=24\n'
+    tracks = dsl.parse_dsl(text)["tracks"]
+    assert tracks[0] is not tracks[4]
+    tracks[0]["events"][0]["chord"] = "mutated"
+    assert tracks[4]["events"][0]["chord"] == "F"
+
+
+def test_error_undefined_section():
+    with pytest.raises(dsl.DslSyntaxError, match=r"line 2.*undefined section 'nope'"):
+        dsl.parse_dsl('bpm=100\nuse section nope start=8\n')
+
+
+def test_error_use_section_missing_start():
+    text = 'bpm=100\nsection intro:\n  chords "Piano" block: C\nuse section intro\n'
+    with pytest.raises(dsl.DslSyntaxError, match=r"line 4.*requires start="):
+        dsl.parse_dsl(text)
+
+
+def test_error_section_with_no_fragments():
+    with pytest.raises(dsl.DslSyntaxError, match=r"line 2.*no track fragments"):
+        dsl.parse_dsl('bpm=100\nsection empty:\nuse section empty start=8\n')
+
+
+def test_error_section_rejects_multi_segment_fragment():
+    text = (
+        'bpm=100\n'
+        'section intro:\n'
+        '  chords "Piano":\n'
+        '  block: C\n'
+    )
+    with pytest.raises(dsl.DslSyntaxError, match=r"line 3.*multi-segment tracks aren't supported"):
+        dsl.parse_dsl(text)
+
+
+def test_error_duplicate_section_name():
+    text = (
+        'bpm=100\n'
+        'section a:\n'
+        '  chords "Piano" block: C\n'
+        'section a:\n'
+        '  chords "Piano" block: G\n'
+    )
+    with pytest.raises(dsl.DslSyntaxError, match=r"line 4.*already defined"):
+        dsl.parse_dsl(text)
+
+
+def test_error_section_header_with_trailing_content():
+    with pytest.raises(dsl.DslSyntaxError, match=r"line 2.*nothing.*after the colon"):
+        dsl.parse_dsl('bpm=100\nsection chorus: extra\n')
 
 
 # ---------------------------------------------------------------------------
@@ -388,14 +588,44 @@ def test_error_drums_with_style_modifier():
         dsl.parse_dsl('bpm=100\ndrums "Power Kit" block: K, H\n')
 
 
-def test_error_raw_missing_content():
-    with pytest.raises(dsl.DslSyntaxError, match=r"line 2.*requires a note-string"):
-        dsl.parse_dsl('bpm=100\nmelody "Violin" raw:\n')
+def test_error_raw_is_no_longer_recognized():
+    with pytest.raises(dsl.DslSyntaxError, match=r"line 2.*unrecognized token 'raw'"):
+        dsl.parse_dsl('bpm=100\nmelody "Violin" raw: E5[.4;.4]\n')
 
 
-def test_error_notes_token_missing_at_sign():
-    with pytest.raises(dsl.DslSyntaxError, match=r"line 2.*E5"):
+def test_error_notes_token_missing_at_sign_and_no_segment_default():
+    with pytest.raises(dsl.DslSyntaxError, match=r"line 2.*E5.*no segment dur="):
         dsl.parse_dsl('bpm=100\nmelody "Violin" notes: E5\n')
+
+
+def test_error_notes_missing_content():
+    with pytest.raises(dsl.DslSyntaxError, match=r"line 2.*requires at least one note/rest/stack token"):
+        dsl.parse_dsl('bpm=100\nmelody "Violin" notes:\n')
+
+
+def test_error_notes_dur_not_valid_on_chord_list_segment():
+    with pytest.raises(dsl.DslSyntaxError, match=r"line 2.*dur=.*isn't valid on a chord-list"):
+        dsl.parse_dsl('bpm=100\nchords "Piano" dur=1/4: C\n')
+
+
+def test_error_chord_style_not_valid_on_notes_segment():
+    with pytest.raises(dsl.DslSyntaxError, match=r"line 2.*can't be combined with a style"):
+        dsl.parse_dsl('bpm=100\nmelody "Violin" block notes dur=1/4: E5\n')
+
+
+def test_error_oct_not_valid_on_notes_segment():
+    with pytest.raises(dsl.DslSyntaxError, match=r"line 2.*oct=.*isn't valid on a notes:"):
+        dsl.parse_dsl('bpm=100\nmelody "Violin" notes dur=1/4 oct=5: E5\n')
+
+
+def test_error_notes_repeat_with_no_preceding_token():
+    with pytest.raises(dsl.DslSyntaxError, match=r"line 2.*no preceding note/rest/stack"):
+        dsl.parse_dsl('bpm=100\nmelody "Violin" notes dur=1/4: x2\n')
+
+
+def test_error_notes_malformed_stack():
+    with pytest.raises(dsl.DslSyntaxError, match=r"line 2.*malformed note stack"):
+        dsl.parse_dsl('bpm=100\nmelody "Violin" notes dur=1/4: C5+\n')
 
 
 def test_error_pattern_not_bracketed():
@@ -419,7 +649,7 @@ LOFI_B2 = """\
 bpm=85 title="lofi study break" key="A minor"
 chords "Electric Piano 1" name="chords" arpeggio_updown oct=3: Am7 Dm7 G7 Cmaj7 Fmaj7 Em7 Am7 G7sus4
 bass "Acoustic Bass" name="bass" root_fifth oct=2: Am7 Dm7 G7 Cmaj7 Fmaj7 Em7 Am7 G7sus4
-melody "Flute" name="melody" raw: E5[.4;.4], r[.4], C5[.4;.4], D5[.4;.4], E5[.2;.2], r[.4], A4[.4;.4], C5[.4;.4], B4[.2;.2], r[.2], G4[.4;.4], A4[.4;.4], B4[.4;.4], C5[.2;.2], r[.2], A4[.2;.2], G4[.2;.2], E4[.2;.2]
+melody "Flute" name="melody" notes dur=1/4: E5 r C5 D5 E5@1/2 r A4 C5 B4@1/2 r@1/2 G4 A4 B4 C5@1/2 r@1/2 A4@1/2 G4@1/2 E4@1/2
 drums "Standard" name="drums" repeat=8: K, H, S, H
 """
 
@@ -451,12 +681,24 @@ LOFI_EXPECTED = {
             "role": "melody",
             "instrument": "Flute",
             "events": [
-                {
-                    "type": "raw",
-                    "notes": "E5[.4;.4], r[.4], C5[.4;.4], D5[.4;.4], E5[.2;.2], r[.4], A4[.4;.4], "
-                    "C5[.4;.4], B4[.2;.2], r[.2], G4[.4;.4], A4[.4;.4], B4[.4;.4], C5[.2;.2], r[.2], "
-                    "A4[.2;.2], G4[.2;.2], E4[.2;.2]",
-                }
+                {"type": "note", "note": "E5", "duration": "1/4"},
+                {"type": "note", "rest": True, "duration": "1/4"},
+                {"type": "note", "note": "C5", "duration": "1/4"},
+                {"type": "note", "note": "D5", "duration": "1/4"},
+                {"type": "note", "note": "E5", "duration": "1/2"},
+                {"type": "note", "rest": True, "duration": "1/4"},
+                {"type": "note", "note": "A4", "duration": "1/4"},
+                {"type": "note", "note": "C5", "duration": "1/4"},
+                {"type": "note", "note": "B4", "duration": "1/2"},
+                {"type": "note", "rest": True, "duration": "1/2"},
+                {"type": "note", "note": "G4", "duration": "1/4"},
+                {"type": "note", "note": "A4", "duration": "1/4"},
+                {"type": "note", "note": "B4", "duration": "1/4"},
+                {"type": "note", "note": "C5", "duration": "1/2"},
+                {"type": "note", "rest": True, "duration": "1/2"},
+                {"type": "note", "note": "A4", "duration": "1/2"},
+                {"type": "note", "note": "G4", "duration": "1/2"},
+                {"type": "note", "note": "E4", "duration": "1/2"},
             ],
         },
         {
@@ -575,7 +817,7 @@ chords "Distortion Guitar" name="rhythm guitar":
 custom "Distortion Guitar" name="rhythm guitar (doubled low)" vol=90:
   custom_pattern pattern=[1,2,1,1,2,1,1,2] subdiv=1/8 oct=1: E5 G5 A5 C5 E5 G5 A5 C5
   block subdiv=1/4 oct=1: F5(+octave) G5(+octave) C5(+octave) G5(+octave)
-melody "Electric Guitar (clean)" name="lead" start=8 raw: E5[1;1], D5[1;1], C5[1;1], D5[1;1]
+melody "Electric Guitar (clean)" name="lead" start=8 notes dur=1: E5 D5 C5 D5
 bass "Electric Bass (pick)" name="bass" root_only oct=1: E5 G5 A5 C5 E5 G5 A5 C5 F5 G5 C5 G5
 drums "Power Kit" name="verse drums" repeat=8: K, H, S, H, K, K, S, H
 drums "Power Kit" name="chorus drums" start=8 repeat=2: K, H, S, H, K, H, S, H, K, H, S, H, K, S2, S2, S2
@@ -620,7 +862,12 @@ METAL_EXPECTED = {
             "role": "melody",
             "instrument": "Electric Guitar (clean)",
             "start_bar": 8,
-            "events": [{"type": "raw", "notes": "E5[1;1], D5[1;1], C5[1;1], D5[1;1]"}],
+            "events": [
+                {"type": "note", "note": "E5", "duration": "1"},
+                {"type": "note", "note": "D5", "duration": "1"},
+                {"type": "note", "note": "C5", "duration": "1"},
+                {"type": "note", "note": "D5", "duration": "1"},
+            ],
         },
         {
             "name": "bass",
